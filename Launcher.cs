@@ -11,9 +11,9 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-[assembly: AssemblyVersion("1.112.0.0")]
-[assembly: AssemblyFileVersion("1.112.0.0")]
-[assembly: AssemblyInformationalVersion("v1112")]
+[assembly: AssemblyVersion("1.113.0.13")]
+[assembly: AssemblyFileVersion("1.113.0.13")]
+[assembly: AssemblyInformationalVersion("v1113-pr13-epic-test")]
 
 internal static class Program {
     static string L(string zh,string en){return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName=="zh"?zh:en;}
@@ -34,14 +34,8 @@ internal static class Program {
     static string FindGame(string[] args){
         string saved=Path.Combine(dataRoot,"game-root.txt");var candidates=new System.Collections.Generic.List<string>{GetArg(args,"--game-root"),Environment.GetEnvironmentVariable("FM27_GAME_ROOT"),File.Exists(saved)?File.ReadAllText(saved).Trim():null};
         foreach(string path in candidates)if(!String.IsNullOrWhiteSpace(path)){File.WriteAllText(saved,path,Encoding.UTF8);return path;}
-        candidates.Clear();string steam=null;
-        try{steam=Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam","SteamPath",null)as string;}
-        catch(System.Security.SecurityException){}catch(UnauthorizedAccessException){}catch(IOException){}
-        if(!String.IsNullOrEmpty(steam)){candidates.Add(Path.Combine(steam,@"steamapps\common\Football Manager 27"));string vdf=Path.Combine(steam,@"steamapps\libraryfolders.vdf");if(File.Exists(vdf))foreach(System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(vdf),"\"path\"\\s+\"([^\"]+)\""))candidates.Add(Path.Combine(match.Groups[1].Value.Replace("\\\\","\\"),@"steamapps\common\Football Manager 27"));}
-        foreach(var drive in DriveInfo.GetDrives())if(drive.IsReady)candidates.Add(Path.Combine(drive.RootDirectory.FullName,@"SteamLibrary\steamapps\common\Football Manager 27"));
-        foreach(string path in candidates)if(!String.IsNullOrEmpty(path)&&File.Exists(Path.Combine(path,@"fm_Data\Plugins\x86_64\game_plugin.dll"))){File.WriteAllText(saved,path,Encoding.UTF8);return path;}
         if(Has(args,"--self-test")||Has(args,"--test-lifecycle"))return "";
-        using(var dialog=new FolderBrowserDialog()){dialog.Description=L("选择本地 FM27 游戏安装目录；也可取消，进入工具后再设置。","Choose the local FM27 installation folder, or cancel to configure it in the tool.");if(dialog.ShowDialog()==DialogResult.OK){File.WriteAllText(saved,dialog.SelectedPath,Encoding.UTF8);return dialog.SelectedPath;}}
+        using(var dialog=new FolderBrowserDialog()){dialog.Description=L("选择 Epic 版 FM27 游戏安装目录；也可取消，进入工具后再设置。","Choose the Epic FM27 installation folder, or cancel to configure it in the tool.");if(dialog.ShowDialog()==DialogResult.OK){File.WriteAllText(saved,dialog.SelectedPath,Encoding.UTF8);return dialog.SelectedPath;}}
         return "";
     }
     static string Unpack(){
@@ -75,15 +69,15 @@ internal static class Program {
     }
     static void Stop(){if(server!=null){try{if(!server.HasExited){server.Kill();server.WaitForExit(5000);}server.WaitForExit();}catch(InvalidOperationException){}server.Dispose();}if(output!=null)output.Dispose();if(error!=null)error.Dispose();}
     [STAThread]static int Main(string[] args){
-        dataRoot=Path.GetFullPath(GetArg(args,"--data-dir",Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"FM27TacticsDesktop")));Directory.CreateDirectory(dataRoot);
-        bool selfTest=Has(args,"--self-test"),lifecycleTest=Has(args,"--test-lifecycle");string testIdentity="";if(selfTest||lifecycleTest)using(var sha=SHA256.Create())testIdentity="_SelfTest_"+BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(dataRoot.ToLowerInvariant()))).Replace("-","").Substring(0,16);bool acquired;using(var mutex=new Mutex(true,"Local\\FM27TacticsDesktop_Editor"+testIdentity,out acquired)){
+        dataRoot=Path.GetFullPath(GetArg(args,"--data-dir",Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"FM27TacticsDesktop_PR13_Epic")));Directory.CreateDirectory(dataRoot);
+        bool selfTest=Has(args,"--self-test"),lifecycleTest=Has(args,"--test-lifecycle");string testIdentity="";if(selfTest||lifecycleTest)using(var sha=SHA256.Create())testIdentity="_SelfTest_"+BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(dataRoot.ToLowerInvariant()))).Replace("-","").Substring(0,16);bool acquired;using(var mutex=new Mutex(true,"Local\\FM27TacticsDesktop_PR13_Epic_Editor"+testIdentity,out acquired)){
             if(!acquired){if(File.Exists(Path.Combine(dataRoot,"url.txt"))){url=File.ReadAllText(Path.Combine(dataRoot,"url.txt"));OpenApp();}return 0;}
             try{
                 string release=Unpack();string engine=EngineRoot(args,release);gameRoot=FindGame(args);File.WriteAllText(Path.Combine(dataRoot,"engine-root.txt"),engine,Encoding.UTF8);StartServer(release,engine,ChoosePort(Int32.Parse(GetArg(args,"--port","18765"))));
                 if(selfTest){foreach(string path in new[]{"/api/catalog","/api/defaults","/api/phase-defaults","/desktop.js","/desktop.css","/engine-settings.js","/save-mode.js","/squad-editor.js","/tactic-pool.js","/tactic-library.js","/api/locale","/i18n.js","/i18n-en.js"})if(ReadUrl(url+path).Length<10)throw new Exception("Empty endpoint: "+path);File.WriteAllText(Path.Combine(dataRoot,"self-test.json"),"{\"ok\":true,\"bundled_python\":true,\"native_match_executed\":false,\"url\":\""+url+"\"}");Stop();return 0;}
                 Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
                 using(var appIcon=Icon.ExtractAssociatedIcon(Application.ExecutablePath))using(var context=new ApplicationContext())using(var tray=new NotifyIcon())using(var menu=new ContextMenuStrip())using(var timer=new System.Windows.Forms.Timer()){
-                    tray.Text=L("FM 战术实验室 · v1112","FM Tactics Lab \u00b7 v1112");tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;
+                    tray.Text=L("FM 战术实验室 · PR13 Epic","FM Tactics Lab \u00b7 PR13 Epic");tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;
                     menu.Items.Add(L("打开战术板","Open tactics board"),null,(s,e)=>OpenApp());menu.Items.Add(L("打开结果目录","Open results folder"),null,(s,e)=>Process.Start(new ProcessStartInfo(dataRoot){UseShellExecute=true}));menu.Items.Add(L("退出","Exit"),null,(s,e)=>context.ExitThread());tray.DoubleClick+=(s,e)=>OpenApp();
                     DateTime launched=DateTime.UtcNow;bool seenPage=false;int failedChecks=0;
                     timer.Interval=2000;timer.Tick+=(s,e)=>{
@@ -93,7 +87,7 @@ internal static class Program {
                     };
                     timer.Start();if(!Has(args,"--no-browser"))OpenApp();try{Application.Run(context);}finally{timer.Stop();tray.Visible=false;Stop();}return 0;
                 }
-            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest)MessageBox.Show(ex.Message,L("FM 战术实验室 · v1112","FM Tactics Lab \u00b7 v1112"),MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
+            }catch(Exception ex){Stop();File.WriteAllText(Path.Combine(dataRoot,"startup-error.txt"),ex.ToString(),Encoding.UTF8);if(!selfTest)MessageBox.Show(ex.Message,L("FM 战术实验室 · PR13 Epic","FM Tactics Lab \u00b7 PR13 Epic"),MessageBoxButtons.OK,MessageBoxIcon.Error);return 1;}
         }
     }
 }

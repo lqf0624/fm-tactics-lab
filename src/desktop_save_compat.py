@@ -1,15 +1,15 @@
 """Observed FM27 save layouts; extends exact registrations, never disables checks.
 
-Supported saves: 27.0.0+2486695, 27.0.0+2493426 and 27.0.1+2494687.
-The two later builds use summary/game/humans/tactics schemas 31/47/24/26. Plan flag 2 also occurs
+Supported saves: 27.0.0+2486695, 27.0.0+2493426, 27.0.1+2494687 and 27.0.1+2503222.
+The later builds use summary/game/humans/tactics schemas 31/47/24/26. Plan flag 2 also occurs
 in native standalone FMF plans, and does not change the slot layout.
 Nonempty counted secondary slot maps are walked without changing native bytes.
 This adapter is installed only inside the private save-reader process.
 """
 from dataclasses import replace
 
-PROFILE = 'fm27-save-2486695-2494687-v7'
-LATER_BUILDS = ('27.0.0+2493426', '27.0.1+2494687')
+PROFILE = 'fm27-save-2486695-2503222-v8'
+LATER_BUILDS = ('27.0.0+2493426', '27.0.1+2494687', '27.0.1+2503222')
 FRAME_DECOMPRESSED_CAP = 768 * 1024**2
 TOTAL_DECOMPRESSED_CAP = 1536 * 1024**2
 
@@ -40,7 +40,7 @@ def install():
             layout=replace(layout,filename_count_offset_after_db_version=167)
         for build in LATER_BUILDS:
             later=layout
-            if isinstance(layout,TacticsLayout) and build=='27.0.1+2494687':
+            if isinstance(layout,TacticsLayout) and build.startswith('27.0.1+'):
                 # The TAC header stores 27.0.1 in the same field that held
                 # 27.0.0. Revision 68 and the slot grammar remain unchanged.
                 def signature(value):
