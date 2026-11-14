@@ -19,7 +19,7 @@ def roster(lib,key,club,team,preferred=()):
     allowed={p['unique_id']:p for p in pool};chosen=[]
     def ability(p):return p.get('ability',{}).get('current') or 0
     positions={'GK':'gk','DCL':'dc','DCR':'dc','DC':'dc','DL':'dl','DR':'dr','WBL':'wbl','WBR':'wbr',
-               'DML':'dm','DMR':'dm','DM':'dm','MCL':'mc','MCR':'mc','MC':'mc','ML':'ml','MR':'mr',
+               'DML':'dm','DMR':'dm','DMC':'dm','DM':'dm','MCL':'mc','MCR':'mc','MC':'mc','ML':'ml','MR':'mr',
                'AML':'aml','AMR':'amr','AMCL':'amc','AMCR':'amc','AMC':'amc','STCL':'stc','STCR':'stc','STC':'stc','ST':'stc','STL':'stc','STR':'stc'}
     preferred=list(preferred)
     for i,cell in enumerate(team['phases'][0]):
@@ -37,5 +37,5 @@ def roster(lib,key,club,team,preferred=()):
         person=allowed[uid];values,profile=lib.player_values(person)
         team['players'][i].update(name=person['name'],source_uid=uid,attributes=values,native_profile=profile)
     for player in team['players'][len(uids):]:player.pop('source_uid',None);player['name']='未入比赛名单'
-    team.update(lineup=list(range(11)),roster_size=len(uids),captains=[],takers={k:[] for k in lib.app.TAKER_KEYS})
+    team.update(roster_source={'id':key,'club_uid':club},lineup=list(range(11)),roster_size=len(uids),captains=[],takers={k:[] for k in lib.app.TAKER_KEYS})
     return team

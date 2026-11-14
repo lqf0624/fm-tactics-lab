@@ -1,15 +1,33 @@
 'use strict';
-function eventPerson(p){return p?`${esc(p.name)} <small class="muted">${esc(p.ip_position)}／${esc(p.oop_position)}${p.position_source==='final_snapshot'?'（终场位置）':''}</small>`:'无助攻';}
-function eventClock(row){if(row.clock==null)return row.display_minute!=null?esc(row.display_minute)+"′":'tick '+row.tick;const seconds=Math.floor(row.clock/4);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
+const resultNameCache=new Map();
+function loadResultNames(job){
+ if(!job||job.preparing||!job.runs?.length||window.FM27I18n.language!=='zh-CN')return;
+ const old=resultNameCache.get(job.id);
+ if(old&&(old.rows||old.pending||Date.now()<old.retryAt))return;
+ const entry={pending:true};
+ resultNameCache.set(job.id,entry);
+ entry.request=api('/api/jobs/'+job.id+'/player-names').then(rows=>{
+  entry.rows=rows;
+  if(selectedJob?.id===job.id&&view==='results')render();
+ }).catch(()=>{entry.retryAt=Date.now()+5000;}).finally(()=>{entry.pending=false;});
+}
+function resultPlayerName(person,variant,job=selectedJob){
+ if(!person)return '';
+ const pair=resultNameCache.get(job?.id)?.rows?.[variant]?.[person.side]?.[person.native_id];
+ return window.FM27I18n.language==='zh-CN'&&pair?.[0]===person.name?pair[1]:person.name;
+}
+function eventPosition(code){return desktopPositionNames[code]||code||'未知';}
+function eventPerson(p,variant){return p?`${esc(resultPlayerName(p,variant))} <small class="muted">${esc(eventPosition(p.ip_position))}／${esc(eventPosition(p.oop_position))}${p.position_source==='final_snapshot'?'（终场位置）':''}</small>`:'无助攻';}
+function eventClock(row){if(row.clock==null)return row.display_minute!=null?esc(row.display_minute)+"′":'引擎计时 '+row.tick;const seconds=Math.floor(row.clock/4);return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');}
 function matchEventDetails(run){
  const events=run?.events;if(!events?.collected)return '<p class="tiny muted">本场未采集球员事件；新运行的比赛会显示射手、助攻和红黄牌。</p>';
  const goals=events.goals||[],cards=events.cards||[];
- return `<section class="player-events">${events.scorers_verified_against_native_totals===false||events.cards_verified_against_native_totals===false?'<p class="notice">部分事件明细未通过原版终场计数核对，对应明细不计入批量分布。</p>':''}<h3>进球与助攻</h3><p class="tiny muted">位置依次为事件时的有球／无球战术位置；时间为原版比赛时钟。</p>${goals.length?goals.map(g=>`<div class="event-goal"><span class="tag">${eventClock(g)}</span><div><b>${g.own_goal?'乌龙球':'进球'}：</b>${g.scorer?eventPerson(g.scorer):'身份未确认'}<br><b>助攻：</b>${eventPerson(g.assist)}</div></div>`).join(''):'<p class="tiny muted">本场没有有效进球。</p>'}<h3>红黄牌</h3>${cards.length?cards.map(c=>`<div class="event-goal"><span class="tag ${c.card==='yellow'?'card-yellow':'card-red'}">${c.card==='yellow'?'黄牌':c.card==='second_yellow'?'两黄变红':'红牌'}</span><div>${eventClock(c)} · ${eventPerson(c.player)}</div></div>`).join(''):'<p class="tiny muted">原版事件记录中没有红黄牌。</p>'}${events.cancelled_goals?.length?`<details><summary>取消的进球 · ${events.cancelled_goals.length}</summary>${events.cancelled_goals.map(g=>`<p>${eventClock(g)} · ${g.scorer?eventPerson(g.scorer):'身份未确认'} · 已剔除</p>`).join('')}</details>`:''}</section>`;
+ return `<section class="player-events">${events.scorers_verified_against_native_totals===false||events.cards_verified_against_native_totals===false?'<p class="notice">部分事件明细未通过原版终场计数核对，对应明细不计入批量分布。</p>':''}<h3>进球与助攻</h3><p class="tiny muted">位置依次为事件时的有球／无球战术位置；时间为原版比赛时钟。</p>${goals.length?goals.map(g=>`<div class="event-goal"><span class="tag">${eventClock(g)}</span><div><b>${g.own_goal?'乌龙球':'进球'}：</b>${g.scorer?eventPerson(g.scorer,run.variant):'身份未确认'}<br><b>助攻：</b>${eventPerson(g.assist,run.variant)}</div></div>`).join(''):'<p class="tiny muted">本场没有有效进球。</p>'}<h3>红黄牌</h3>${cards.length?cards.map(c=>`<div class="event-goal"><span class="tag ${c.card==='yellow'?'card-yellow':'card-red'}">${c.card==='yellow'?'黄牌':c.card==='second_yellow'?'两黄变红':'红牌'}</span><div>${eventClock(c)} · ${eventPerson(c.player,run.variant)}</div></div>`).join(''):'<p class="tiny muted">原版事件记录中没有红黄牌。</p>'}${events.cancelled_goals?.length?`<details><summary>取消的进球 · ${events.cancelled_goals.length}</summary>${events.cancelled_goals.map(g=>`<p>${eventClock(g)} · ${g.scorer?eventPerson(g.scorer,run.variant):'身份未确认'} · 已剔除</p>`).join('')}</details>`:''}</section>`;
 }
 function eventDistribution(j){
  if(!j.distributions)return '';
  return Object.entries(j.distributions).map(([variant,data])=>{if(!data.matches_with_events)return '';
-  const table=(items,position)=>`<div class="table-scroll"><table><thead><tr><th>${position?'有球／无球位置':'球员'}</th><th>进球</th><th>助攻</th><th>乌龙</th><th>黄牌</th><th>红牌</th></tr></thead><tbody>${items.map(p=>`<tr><td>${position?esc(p.ip_position+'／'+p.oop_position):esc(p.name)} <small class="muted">${esc(j.team_names?.[variant]?.[p.side]||['主队','客队'][p.side])}</small></td><td>${p.goals}</td><td>${p.assists}</td><td>${p.own_goals}</td><td>${p.yellow_cards}</td><td>${p.red_cards}</td></tr>`).join('')}</tbody></table></div>`;
+  const table=(items,position)=>`<div class="table-scroll"><table><thead><tr><th>${position?'有球／无球位置':'球员'}</th><th>进球</th><th>助攻</th><th>乌龙</th><th>黄牌</th><th>红牌</th></tr></thead><tbody>${items.map(p=>`<tr><td>${position?esc(eventPosition(p.ip_position)+'／'+eventPosition(p.oop_position)):esc(resultPlayerName(p,variant,j))} <small class="muted">${esc(j.team_names?.[variant]?.[p.side]||['主队','客队'][p.side])}</small></td><td>${p.goals}</td><td>${p.assists}</td><td>${p.own_goals}</td><td>${p.yellow_cards}</td><td>${p.red_cards}</td></tr>`).join('')}</tbody></table></div>`;
   return `<section class="card event-distribution"><div class="card-head"><h3>${esc(variantLabel(variant,j))} · 球员与位置分布</h3><span class="tag">${data.matches_with_events} 场有事件记录</span></div><div class="card-body"><details open><summary>按球员统计</summary>${table(data.players,false)}</details><details><summary>按位置统计</summary>${table(data.positions,true)}</details><p class="tiny muted">${data.unverified_goal_matches||data.unverified_card_matches?'未通过核对的进球／牌明细已排除。':''}两黄变红计两张黄牌及一次红牌；取消的进球不计入。位置按事件发生时记录。</p></div></section>`;
  }).join('');
 }

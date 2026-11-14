@@ -105,13 +105,13 @@ $('#random-mode').onchange=()=>{
 const poolBindPrevious=bind;
 bind=function(){
  poolBindPrevious();syncRandomMode();
- const run=$('#run').onclick;
- $('#run').onclick=async function(event){
+};
+const runBeforePool=$('#run').onclick;
+$('#run').onclick=async function(event){
   if(saveMode!=='save'&&randomSelectionPending){
    randomOptionsOpen=true;syncRandomMode();toast('请先添加随机候选战术');return;
   }
-  return run?.call(this,event);
- };
+  return runBeforePool.call(this,event);
 };
 const updateRandomPosition=()=>document.documentElement.style.setProperty('--runbar-height',$('.runbar').getBoundingClientRect().height+'px');
 new ResizeObserver(updateRandomPosition).observe($('.runbar'));

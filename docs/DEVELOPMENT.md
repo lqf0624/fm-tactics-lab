@@ -1,4 +1,4 @@
-# Building FM Tactics Lab v1108.5
+# Building FM Tactics Lab v1114.6
 
 This source includes the career-save reader and same-league match mode shipped in v1108.5.
 
@@ -46,7 +46,7 @@ Open the printed loopback URL after startup. Press `Ctrl+C` to stop the source e
 .venv\Scripts\python.exe scripts/build_exe.py --python-home "D:\Python312"
 ```
 
-Supply a full CPython 3.12 x64 distribution containing `Lib`, `DLLs`, `python312.dll`, the runtime libraries and `LICENSE.txt`. The script uses the .NET Framework C# compiler; `--csc` can override its location. Output: `dist/FM27-Tactics-Lab-v1108.5.exe`.
+Supply a full CPython 3.12 x64 distribution containing `Lib`, `DLLs`, `python312.dll`, the runtime libraries and `LICENSE.txt`. The script uses the .NET Framework C# compiler; `--csc` can override its location. Output: `dist/FM27-Tactics-Lab-v1114.6.exe` (or `v1114.6-epic-test` with `--platform epic`).
 
 The build script packages the save reader from the active Python environment. The release EXE and a local build can have different hashes.
 

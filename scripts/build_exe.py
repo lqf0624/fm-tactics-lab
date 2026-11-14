@@ -68,7 +68,7 @@ def main():
         for name in ('fm27_native/FM27Simulator.exe', 'fm27_native/engine_compat_profile.json',
                      'fm27_native/adapter_version.json'):
             archive.write(engine / name, 'engine/' + name)
-    version = 'v1113.1-epic-test' if epic else 'v1113.1'
+    version = 'v1114.6-epic-test' if epic else 'v1114.6'
     exe = dist / f'FM27-Tactics-Lab-{version}.exe'
     subprocess.run([str(args.csc), '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/utf8output',
                     *(['/define:EPIC_BUILD'] if epic else []),

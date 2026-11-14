@@ -48,17 +48,27 @@ Each batch uses a sequence of random seeds. When comparing a saved reference wit
 
 ## Download and launch
 
-The current source version is **v1113.1**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
+The current source version is **v1114.6**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Exit the previous app from its tray menu before launching an update.
 
 Install FM27, open Steam and sign in to the account that owns the game, then launch the EXE. The tool looks for your installation automatically. You can also select the game root containing `fm_Data` and `shared` in the engine settings at the top.
 
 The EXE includes its Python runtime. Players do not need Python or a compiler. The interface follows the Windows display language and supports Chinese and English. Source setup is described in the [developer guide](docs/DEVELOPMENT.md).
 
+## v1114.6
+
+Save-specific player identities, reliable Chinese names and current registered shirts now follow squad and season changes. Select managed clubs or clubs from the loaded top five leagues, including cross-league opponents. Clubs without saved tactics explicitly reuse the current board. Two-round tests keep screening and retest seeds/statistics separate, support A/B comparison and resume, and disable opposition/specific marking instructions on both sides.
+
+Coach identification, a documented assistant fallback, stale selection responses and temporary Windows summary-file locks are handled. Chinese names fall back to the original name when no reliable translation exists. Full backup/restore remains planned. See [validation](docs/V1114_6_VALIDATION.md), [portability](docs/PORTABILITY.md) and [requirements](PRD.md) (Chinese).
+
+Source builds retain the official `%LOCALAPPDATA%\FM27TacticsDesktop` data folder. The previously tested local edition used `FM27TacticsDesktop_LocalEdition`; pass `--data-dir` explicitly to open that data. A source update does not publish a new release executable. Steam was validated; the Epic build entry point remains available but v1114.6 Epic matches were not retested.
+
+The optional [role-attribute extension](extensions/role-attribute-research/README.md) remains pinned to its declared v1113.1 baseline; its integration patch has not been rebased to v1114.6.
+
 ## Career-save matches
 
-1. Switch to **存档对战** (Career-save Matches), import an FM27 .fm save, and select the club you manage.
-2. Load its tactic, review first-team attributes, and adjust your starting lineup and bench.
-3. Select opponents from the same league. Preview their in-possession and out-of-possession boards, then run home and away matches.
+1. Switch to **存档对战** (Career-save Matches), import an FM27 .fm save, and select a managed club or a club from the loaded top five leagues.
+2. Load its tactic, or explicitly reuse the current board with the selected real squad; review first-team attributes and adjust the lineup and bench.
+3. Select same-league or cross-league opponents. Preview their in-possession and out-of-possession boards, then run home and away matches.
 
 Opponent tactics use a built-in preset selected from the head coach's saved style and formation preferences. A team is selectable when both the coach and preferences can be verified. Opponent squads load in batches as needed. You can track or cancel match preparation.
 
@@ -156,7 +166,7 @@ The random away tactic pool can be combined with experimental tactical execution
 
 ## Version and project information
 
-The current source version is **v1113.1**, for Windows x64. The adapter reference build is `27.0.1+2503222`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
+The current source version is **v1114.6**, for Windows x64. The adapter reference build is `27.0.1+2503222`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
 
 Original engine code and a career match's complete conditions are separate considerations. This tool standardizes starting states; inputs, random states and in-match interventions affect results. Evidence and validation scope are described in [Simulation Fidelity](docs/SIMULATION_FIDELITY.md).
 

@@ -11,21 +11,21 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-[assembly: AssemblyVersion("1.113.0.1")]
-[assembly: AssemblyFileVersion("1.113.0.1")]
+[assembly: AssemblyVersion("1.114.0.6")]
+[assembly: AssemblyFileVersion("1.114.0.6")]
 #if EPIC_BUILD
-[assembly: AssemblyInformationalVersion("v1113.1-epic-test")]
+[assembly: AssemblyInformationalVersion("v1114.6-epic-test")]
 #else
-[assembly: AssemblyInformationalVersion("v1113.1")]
+[assembly: AssemblyInformationalVersion("v1114.6")]
 #endif
 
 internal static class Program {
 #if EPIC_BUILD
     const string AppDataFolder="FM27TacticsDesktop_PR13_Epic";
-    const string BuildLabel="v1113.1 Epic";
+    const string BuildLabel="v1114.6 Epic";
 #else
     const string AppDataFolder="FM27TacticsDesktop";
-    const string BuildLabel="v1113.1";
+    const string BuildLabel="v1114.6";
 #endif
     static string L(string zh,string en){return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName=="zh"?zh:en;}
     static Process server;
@@ -112,7 +112,7 @@ internal static class Program {
             if(!acquired){if(File.Exists(Path.Combine(dataRoot,"url.txt"))){url=File.ReadAllText(Path.Combine(dataRoot,"url.txt"));OpenApp();}return 0;}
             try{
                 string release=Unpack();string engine=EngineRoot(args,release);gameRoot=FindGame(args);File.WriteAllText(Path.Combine(dataRoot,"engine-root.txt"),engine,Encoding.UTF8);StartServer(release,engine,ChoosePort(Int32.Parse(GetArg(args,"--port","18765"))));
-                if(selfTest){foreach(string path in new[]{"/api/catalog","/api/defaults","/api/phase-defaults","/desktop.js","/desktop.css","/engine-settings.js","/save-mode.js","/squad-editor.js","/tactic-pool.js","/tactic-library.js","/api/locale","/i18n.js","/i18n-en.js"})if(ReadUrl(url+path).Length<10)throw new Exception("Empty endpoint: "+path);File.WriteAllText(Path.Combine(dataRoot,"self-test.json"),"{\"ok\":true,\"bundled_python\":true,\"native_match_executed\":false,\"url\":\""+url+"\"}");Stop();return 0;}
+                if(selfTest){foreach(string path in new[]{"/api/catalog","/api/defaults","/api/phase-defaults","/desktop.js","/desktop.css","/engine-settings.js","/save-mode.js","/league-testing.js","/squad-editor.js","/tactic-pool.js","/tactic-library.js","/api/locale","/i18n.js","/i18n-en.js"})if(ReadUrl(url+path).Length<10)throw new Exception("Empty endpoint: "+path);File.WriteAllText(Path.Combine(dataRoot,"self-test.json"),"{\"ok\":true,\"bundled_python\":true,\"native_match_executed\":false,\"url\":\""+url+"\"}");Stop();return 0;}
                 Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
                 using(var appIcon=Icon.ExtractAssociatedIcon(Application.ExecutablePath))using(var context=new ApplicationContext())using(var tray=new NotifyIcon())using(var menu=new ContextMenuStrip())using(var timer=new System.Windows.Forms.Timer()){
                     tray.Text=L("FM 战术实验室 · ","FM Tactics Lab \u00b7 ")+BuildLabel;tray.Icon=appIcon??SystemIcons.Application;tray.ContextMenuStrip=menu;tray.Visible=!lifecycleTest;

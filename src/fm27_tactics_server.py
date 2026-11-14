@@ -11,6 +11,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import struct
@@ -155,6 +156,10 @@ def validate_scenario(data):
         n=normalized['teams'][side];base=DEFAULT['teams'][side]
         source=desktop_source_plans.baseline(sys.modules[__name__],t)
         if source is not None:n['native_source_plan']=copy.deepcopy(t['native_source_plan'])
+        # The binding belongs to the editor and is never sent to the native match engine.
+        binding = t.get('roster_source')
+        if isinstance(binding,dict) and re.fullmatch('[a-f0-9]{16}',str(binding.get('id',''))):
+            n['roster_source'] = {'id':binding['id'],'club_uid':integer(binding.get('club_uid'),0,0xffffffff,'球队')}
         n['name']=str(t.get('name',''))[:40]
         n['tactic_name']=str(t.get('tactic_name',''))[:120]
         try:extra=int(t.get('native_extra_team_bits',base['native_extra_team_bits']))
@@ -219,6 +224,16 @@ def validate_scenario(data):
             result['personal']=row['personal'];return result
         n['opposition']['players']=[oi_row(r)for r in opp['players']]
         n['opposition']['positions']={p:oi_row(opp['positions'][p])for p in POSITIONS}
+        if 'by_player_uid' in opp:
+            overrides = opp['by_player_uid']
+            if not isinstance(overrides,dict) or len(overrides)>5000:
+                raise ValueError('针对性指令的球员名单无效')
+            checked={}
+            for uid,row in overrides.items():
+                if not isinstance(uid,str) or not re.fullmatch(r'[1-9][0-9]{0,9}',uid) or int(uid)>0xffffffff:
+                    raise ValueError('针对性指令的球员编号无效')
+                checked[uid]=oi_row(row)
+            n['opposition']['by_player_uid']=checked
         if len(t['phases'])!=2:raise ValueError('必须配置有球和无球阶段')
         for phase,cells in enumerate(t['phases']):
             if len(cells)!=11:raise ValueError('每个阶段必须有11个位置')
@@ -367,6 +382,7 @@ def metrics(runs):
 LOCK=threading.RLock();JOBS={};POOL=ThreadPoolExecutor(max_workers=1)
 IMPORT_LOCK=threading.Lock()
 import desktop_save_mode
+import desktop_test_rounds
 import sys
 SAVE_LIBRARY=desktop_save_mode.SaveLibrary(sys.modules[__name__])
 
@@ -391,11 +407,18 @@ def create_save_job(data):
     if enabled_pool(scenario)or enabled_pool(reference):raise ValueError('随机客队战术池仅支持自由推演，存档对战不可用')
     own=integer(data.get('club_uid'),0,0xffffffff,'己方球队')
     selected=data.get('opponents')
-    if not isinstance(selected,list) or not 1<=len(selected)<=40 or len({v['key'] for v in selected})!=len(selected):
-        raise ValueError('请选择1–40个不重复的真实对手方案')
+    if not isinstance(selected,list) or not 1<=len(selected)<=120 or len({v['key'] for v in selected})!=len(selected):
+        raise ValueError('请选择1–120个不重复的真实对手方案')
     count=integer(data.get('count'),2,10000,'每队场数')
     if count%2: raise ValueError('主客场各半时，每队场数必须为偶数')
-    require_space(RUNS,additional_bytes=len(selected)*count*(2 if reference else 1)*3*1024**2)
+    two_rounds=data.get('two_rounds',False)
+    if type(two_rounds)is not bool:raise ValueError('两轮测试开关无效')
+    rounds=desktop_test_rounds.plan(data.get('first_seed'),count,data.get('retest_count',count)) if two_rounds else []
+    match_count=count+(data.get('retest_count',count) if two_rounds else 0)
+    require_space(RUNS,additional_bytes=len(selected)*match_count*(2 if reference else 1)*3*1024**2)
+    source=scenario['teams'][0].get('roster_source',{})
+    if source!={'id':data['save_id'],'club_uid':own}:raise ValueError('己方阵容与所选存档或球队不一致，请重新载入')
+    if reference and reference['teams'][0].get('roster_source')!=source:raise ValueError('对照须来自同一存档和球队，请重新设置对照')
     first=integer(data.get('first_seed'),0,0xffffffff,'起始种子')
     if first+count//2-1>0xffffffff: raise ValueError('种子超出范围')
     workers=integer(data.get('workers',1),1,worker_limits()['maximum'],'并行数')
@@ -405,12 +428,12 @@ def create_save_job(data):
         if any(j['status']in ('queued','running')for j in JOBS.values()):raise ValueError('已有比赛运行中')
         key=secrets.token_hex(6);directory=RUNS/f'{datetime.now():%Y%m%d_%H%M%S}_{key}';directory.mkdir()
         job={'batch_schema':1,'id':key,'status':'queued','preparing':True,'stage':'正在准备同联赛对手',
-             'workers':workers,'completed':0,'total':len(selected)*count*(2 if reference else 1),
+             'workers':workers,'completed':0,'total':len(selected)*match_count*(2 if reference else 1),
              'runs':[],'metrics':{},'failures':[],'active':[],'created':time.time(),
              'output_dir':str(directory),'_dir':directory,'_cancel':False,
              'name':experiment_name(data.get('name'),f"{scenario['teams'][0]['name']} · {len(selected)}队"),
              'experiment_type':'save_opponents','schedule':{},'variant_names':{},'team_names':{},
-             'mode':'comparison'if reference else'single','event_details':event_details}
+             'mode':'comparison'if reference else'single','event_details':event_details,'test_rounds':rounds}
         JOBS[key]=job;persist(job)
     def stage(text):
         with LOCK:
@@ -436,6 +459,7 @@ def create_save_job(data):
                     for group,source in ([('A',reference),('B',scenario)] if reference else [('B',scenario)]):
                         target=copy.deepcopy(source)
                         target.pop('native_generation',None)
+                        match_opposition(target['teams'][0],target['teams'][1],team,data['save_id'])
                         target['teams'][1]=copy.deepcopy(team)
                         if venue=='A':
                             target['teams']=[transplant_team(target['teams'][1],0),transplant_team(target['teams'][0],1)]
@@ -444,6 +468,7 @@ def create_save_job(data):
                         label=f'{group}_{index}_{venue}'
                         if opponent.get('source_kind')=='original_ai_generation':
                             target['native_generation']=desktop_generation_catalog.scenario_profile(SAVE_LIBRARY,data['save_id'],own,opponent['club_uid'],0 if venue=='H'else 1,target['teams'])
+                        if rounds:desktop_test_rounds.neutralize(target)
                         target=validate_scenario(target)
                         variants.append((label,target))
                         schedule[label]={'group':group,'opponent':opponent['name'],'opponent_key':opponent['key'],
@@ -452,7 +477,7 @@ def create_save_job(data):
                             'tested_side':0 if venue=='H' else 1,'venue':venue,'source':opponent['source'],'member':opponent['member'],
                             'cache_roster_count':opponent['cache_roster_count'],'match_roster_count':opponent['match_roster_count'],
                             'excluded_substitute_uids':opponent['excluded_substitute_uids']}
-            seeds=list(range(first,first+count//2))
+            seeds=[seed for r in rounds for seed in r['seeds']] if rounds else list(range(first,first+count//2))
             with LOCK:
                 if job.get('_cancel'):raise CancelledError('已取消比赛准备')
                 key=job['id'];directory=job['_dir']
@@ -465,7 +490,8 @@ def create_save_job(data):
                     'native_dll_sha256':ENGINE_DLL_SHA256,'engine_resource_fingerprint':ENGINE_COMPATIBILITY['resource_fingerprint'],
                     'engine_compatibility':copy.deepcopy(ENGINE_COMPATIBILITY),'seeds':seeds,'event_details':event_details,
                     'config_hashes':{v:hashlib.sha256((directory/f'{v}.bin').read_bytes()).hexdigest()for v,_ in variants},
-                    'save_source':{k:source[k]for k in ['id','source','source_sha256','date','build']},'schedule':schedule}
+                    'save_source':{k:source[k]for k in ['id','source','source_sha256','date','build']},'schedule':schedule,
+                    'test_rounds':rounds,'opposition_disabled':bool(rounds)}
                 (directory/'provenance.json').write_text(json.dumps(provenance,ensure_ascii=False),encoding='utf8')
                 prepared={'batch_schema':1,'workers':workers,'failures':[],'active':[],'id':key,'status':'queued','completed':0,
                     'total':len(seeds)*len(variants),'runs':[],'metrics':{},'created':time.time(),'output_dir':str(directory),'_dir':directory,
@@ -483,6 +509,21 @@ def create_save_job(data):
             with LOCK:job.update(status='error',preparing=False,stage='比赛准备失败',error=str(error),finished=time.time());persist(job)
     POOL.submit(prepare)
     return {'id':key}
+
+def match_opposition(owner, previous_opponent, opponent, save_id):
+    """Bind career instructions to each real opponent before swapping venues."""
+    oi = owner['opposition']
+    previous = {}
+    if (previous_opponent.get('roster_source') or {}).get('id') == save_id:
+        previous = {p['source_uid']:row for p,row in zip(previous_opponent['players'],oi['players'])
+                    if p.get('source_uid') is not None}
+    overrides = oi.get('by_player_uid',{})
+    by_position = unpack_oi(0)
+    oi['players'] = [
+        overrides.get(str(p.get('source_uid')),previous.get(p.get('source_uid'),by_position)).copy()
+        for p in opponent['players']
+    ]
+
 
 def transplant_team(source, side):
     target=copy.deepcopy(source)
@@ -584,11 +625,27 @@ def export_setpiece(data):
     return {'filename':name+'.fmf','file_base64':base64.b64encode(payload).decode(),'report':{'native_roundtrip_verified':True,'notice':'定位球 FMF 已通过原版回读核验。'}}
 
 def persist(job):
+    from desktop_storage import write_json_atomic, publish_summary
     with LOCK:
-        public={k:v for k,v in job.items() if not k.startswith('_')}
-        temporary=job['_dir']/'summary.tmp'
-        temporary.write_text(json.dumps(public,ensure_ascii=False,indent=2),encoding='utf8')
-        os.replace(temporary,job['_dir']/'summary.json')
+        public = {k:v for k,v in job.items() if not k.startswith('_')}
+        directory = job['_dir']
+        write_json_atomic(directory/'summary.pending.json', public)
+        if publish_summary(directory) or job.get('_summary_timer'):
+            return
+
+        def retry():
+            with LOCK:
+                job.pop('_summary_timer', None)
+                if not publish_summary(directory):
+                    schedule()
+
+        def schedule():
+            timer = threading.Timer(1, retry)
+            timer.daemon = True
+            job['_summary_timer'] = timer
+            timer.start()
+
+        schedule()
 
 def episode_metrics(runs,side):
     valid=[r for r in runs if r.get('episode',{}).get('found')];n=len(valid)
@@ -615,9 +672,30 @@ def update_metrics(job,scenarios):
             return value
         groups=['A','B'] if job['mode']=='comparison' else ['B']
         job['metrics']={g:save_metrics([r for r in job['runs'] if job['schedule'][r['variant']]['group']==g]) for g in groups}
+        if job.get('test_rounds'):
+            by_round={}
+            for stage in job['test_rounds']:
+                seeds=set(stage['seeds'])
+                part=[r for r in job['runs'] if r['seed'] in seeds]
+                values={g:save_metrics([r for r in part if job['schedule'][r['variant']]['group']==g]) for g in groups}
+                expected=len(seeds)*len(job['schedule'])
+                by_round[str(stage['number'])]={'name':stage['name'],'metrics':values,'completed':len(part),
+                    'total':expected,'complete':len(part)==expected,
+                    'ranking':desktop_test_rounds.ranking(values) if len(part)==expected else [],
+                    'seed_first':stage['seeds'][0],'seed_last':stage['seeds'][-1]}
+            job['round_results']=by_round
+            # The primary summary is the independent second round once it starts.
+            latest=by_round['2'] if by_round['2']['completed'] else by_round['1']
+            job['metrics']=latest['metrics']
+
         job['opponent_metrics']={key:{g:save_metrics([r for r in job['runs'] if job['schedule'][r['variant']]['group']==g and job['schedule'][r['variant']]['opponent_key']==key])for g in groups}for key in {v['opponent_key']for v in job['schedule'].values()}}
         pairs={}
-        for run in job['runs']:
+        paired_runs=job['runs']
+        if job.get('test_rounds'):
+            number=2 if job['round_results']['2']['completed'] else 1
+            active_seeds=set(job['test_rounds'][number-1]['seeds'])
+            paired_runs=[r for r in paired_runs if r['seed'] in active_seeds]
+        for run in paired_runs:
             spec=job['schedule'][run['variant']]
             pairs.setdefault((spec['opponent_key'],spec['venue'],run['seed']),{})[spec['group']]=oriented(run)
         complete=[v for v in pairs.values()if 'A'in v and 'B'in v]
@@ -686,7 +764,15 @@ def execute(job,scenarios,seeds):
                 elapsed=time.perf_counter()-began;n=job['completed']-initial
                 job.update(active=active,current=active[0]if active else None,elapsed_seconds=round(previous+elapsed,3),matches_per_minute=round(n*60/elapsed,2)if elapsed else 0,eta_seconds=round((job['total']-job['completed'])*elapsed/n)if n else None)
                 if elapsed-last_save>=1:persist(job);last_save=elapsed
-        runner.run(tasks,result,progress)
+        if job.get('test_rounds'):
+            for stage in job['test_rounds']:
+                if runner.stop.is_set() or job['failures']:break
+                allowed=set(stage['seeds'])
+                with LOCK:
+                    job['stage']=stage['name'];job['current_round']=stage['number'];persist(job)
+                runner.run([task for task in tasks if task['seed'] in allowed],result,progress)
+        else:
+            runner.run(tasks,result,progress)
         with LOCK:
             job['status']='error'if job['failures']else('cancelled'if runner.stop.is_set()else'complete')
             if job['failures']:job['error']=f"{len(job['failures'])}项原生比赛或数据校验失败；现场与原种子保留，未自动重跑整场比赛"
@@ -704,6 +790,7 @@ def resume_job(job,workers):
     if job.get('initial_state_policy',{}).get('id')!='controlled-start-v3':raise ValueError('旧实验的开赛状态规则不同，请新建实验，避免混合结果')
     if job.get('batch_schema')!=1:raise ValueError('旧任务缺少批量校验记录，请新建实验')
     provenance=json.loads((job['_dir']/'provenance.json').read_text(encoding='utf8'))
+    if job.get('test_rounds',[])!=provenance.get('test_rounds',[]):raise ValueError('两轮种子计划已改变，不能混合续跑')
     if job.get('event_details',True)!=provenance.get('event_details',True):raise ValueError('事件采集模式与原任务不同，不能混合续跑')
     if provenance.get('native_dll_sha256')!=ENGINE_DLL_SHA256 or provenance.get('engine_resource_fingerprint')!=ENGINE_COMPATIBILITY['resource_fingerprint']:raise ValueError('实际引擎或比赛资源与本实验不同，请新建实验以免混合结果')
     for name,path in [('host_sha256',NATIVE/'FM27Simulator.exe'),('fixture_sha256',NATIVE/'fixtures/match.pkm')]:
@@ -789,7 +876,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/catalog':return self.send(CATALOG)
         if path=='/api/defaults':return self.send(DEFAULT)
         if path=='/api/phase-defaults':return self.send(phase_inputs.pack(DEFAULT,CATALOG))
-        if path=='/api/status':return self.send({'engine':'original_native','engine_compatibility':ENGINE_COMPATIBILITY,'server_pid':os.getpid(),'application_version':'v1113.1','execution_available':execution_available(),'fmf_version_validation':'original_game_reader','fixture_me_version':'26.8.0.0','independent':True,'team_groups':len(GROUPS),'team_options':sum(len(g['options'])for g in GROUPS.values()),'player_groups':17,'roles':79,'batch':{'max_matches_per_variant':10000,**worker_limits(),'isolation':'bounded_reused_native_sessions','jobs_per_native_session':None,'session_policy':'remaining_batch_lane_when_supported','postprocess_workers':2,'whole_match_automatic_retries':0}})
+        if path=='/api/status':return self.send({'engine':'original_native','engine_compatibility':ENGINE_COMPATIBILITY,'server_pid':os.getpid(),'application_version':'v1114.6','execution_available':execution_available(),'fmf_version_validation':'original_game_reader','fixture_me_version':'26.8.0.0','independent':True,'team_groups':len(GROUPS),'team_options':sum(len(g['options'])for g in GROUPS.values()),'player_groups':17,'roles':79,'batch':{'max_matches_per_variant':10000,**worker_limits(),'isolation':'bounded_reused_native_sessions','jobs_per_native_session':None,'session_policy':'remaining_batch_lane_when_supported','postprocess_workers':2,'whole_match_automatic_retries':0}})
         if path=='/api/save/status':
             query=parse_qs(urlparse(self.path).query)
             try: return self.send(SAVE_LIBRARY.status(query.get('id',[None])[0]))
@@ -801,6 +888,16 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/jobs':
             with LOCK:return self.send([{k:v for k,v in j.items()if not k.startswith('_')and(k!='runs'or parse_qs(urlparse(self.path).query).get('brief')!=['1'])}for j in sorted(JOBS.values(),key=lambda j:j.get('created',0))])
         parts=path.strip('/').split('/')
+        if len(parts)==4 and parts[:2]==['api','jobs'] and parts[3]=='player-names':
+            import desktop_player_display
+            with LOCK:
+                job=JOBS.get(parts[2])
+                if not job:return self.send({'error':'任务不存在'},404)
+                if job.get('preparing'):return self.send({})
+                directory=job['_dir']
+                variants=list(job.get('schedule') or job.get('team_names') or {})
+            try:return self.send(desktop_player_display.result_labels(SAVE_LIBRARY,directory,variants))
+            except (OSError,ValueError) as error:return self.send({'error':str(error)},400)
         if len(parts)>=3 and parts[:2]==['api','jobs']:
             with LOCK:
                 job=JOBS.get(parts[2])
@@ -823,7 +920,8 @@ class Handler(BaseHTTPRequestHandler):
                     if name not in [r['log']for r in job['runs']]:return self.send({'error':'日志不存在'},404)
                     return self.send((job['_dir']/name).read_bytes(),kind='application/x-ndjson; charset=utf-8')
         known={'/team-bulk.js':'team-bulk.js','/desktop-workspace.js':'desktop-workspace.js','/match-events.js':'match-events.js','/desktop.js':'desktop.js','/desktop.css':'desktop.css','/':'index.html','/app.js':'app.js','/advanced.js':'advanced.js','/setpieces.js':'setpieces.js','/batch.js':'batch.js','/style.css':'style.css'}
-        known.update({'/save-mode.js':'save-mode.js','/save-mode.css':'save-mode.css','/engine-settings.js':'engine-settings.js'})
+        known.update({'/league-testing.js':'league-testing.js','/save-mode.js':'save-mode.js','/save-mode.css':'save-mode.css','/engine-settings.js':'engine-settings.js'})
+        known['/player-display.js']='player-display.js'
         known['/squad-editor.js']='squad-editor.js'
         known['/tactic-pool.js']='tactic-pool.js'
         known['/tactic-library.js']='tactic-library.js'
@@ -840,6 +938,31 @@ class Handler(BaseHTTPRequestHandler):
             length=int(self.headers.get('Content-Length',0))
             if not 0<length<=(8000000 if urlparse(self.path).path in ('/api/import-fmf','/api/pool/import-fmf','/api/save/league-pool')else 1500000):raise ValueError('请求大小无效')
             data=json.loads(self.rfile.read(length));path=urlparse(self.path).path
+            retest_fixture = None
+            if path=='/api/jobs/retest':
+                with LOCK:
+                    old = JOBS.get(data.get('id'))
+                    label = data.get('variant')
+                    if not old or old.get('experiment_type') != 'save_opponents' or label not in old.get('schedule', {}):
+                        raise ValueError('请选择存档对战中的一场比赛')
+                    spec = old['schedule'][label]
+                    provenance = json.loads((old['_dir']/'provenance.json').read_text(encoding='utf8'))
+                    snapshot = json.loads((old['_dir']/f'{label}.json').read_text(encoding='utf8'))
+                    if hashlib.sha256(encode_scenario(snapshot)).hexdigest() != provenance['config_hashes'][label]:
+                        raise ValueError('比赛快照校验失败')
+                    count = integer(data.get('count',10),1,100,'复测场数')
+                    used = set(provenance['seeds'])
+                    seeds = []
+                    seed = (max(used)+1) % (2**32)
+                    while len(seeds)<count:
+                        if seed not in used: seeds.append(seed)
+                        seed = (seed+1) % (2**32)
+                    provenance_source = provenance.get('save_source')
+                    retest_fixture = {**spec,'group':'B'}
+                    data = {'scenario':snapshot,'seeds':seeds,'workers':data.get('workers',1),
+                            'event_details':old.get('event_details',True),
+                            'name':f"{spec['opponent']} · {'主场' if spec['venue']=='H' else '客场'}复测 · {count}场"}
+                    path = '/api/run'
             if path=='/api/jobs/rename':
                 with LOCK:
                     job=JOBS.get(data.get('id'))
@@ -885,6 +1008,15 @@ class Handler(BaseHTTPRequestHandler):
                     require_league_idle('导入客队战术池')
                     return self.send(SAVE_LIBRARY.import_league_tactics_pool(data['id'],data['league'],data['scenario']))
                 if path=='/api/save/import': return self.send(SAVE_LIBRARY.start(data['path']),202)
+                if path in ('/api/save/player-display','/api/save/import-player-display'):
+                    import desktop_player_display as display
+                    if path.endswith('import-player-display'):
+                        return self.send(display.import_rows(SAVE_LIBRARY,data['id'],data['club_uid'],data))
+                    return self.send(display.current_rows(SAVE_LIBRARY,data['id'],force=data.get('refresh') is True,club=data.get('club_uid')))
+                if path=='/api/save/board-clubs':
+                    return self.send(SAVE_LIBRARY.board_clubs(data.get('id'),data.get('managed')))
+                if path=='/api/save/board-roster':
+                    return self.send(SAVE_LIBRARY.board_roster(data['id'],data['club_uid'],data['side'],data['scenario']))
                 if path=='/api/save/club': return self.send(SAVE_LIBRARY.club(data['id'],data['club_uid']))
                 if path=='/api/save/load':
                     with IMPORT_LOCK,LOCK:
@@ -980,6 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
                                     'config_file':f'{label}_pool{entry_index}.bin','config_sha256':hashlib.sha256(payload).hexdigest(),
                                     'scenario_file':f'{label}_pool{entry_index}.json','scenario_sha256':hashlib.sha256(document).hexdigest()})
                     provenance={'host_sha256':hashlib.sha256((NATIVE/'FM27Simulator.exe').read_bytes()).hexdigest(),'fixture_sha256':hashlib.sha256((NATIVE/'fixtures/match.pkm').read_bytes()).hexdigest(),'native_dll_sha256':ENGINE_DLL_SHA256,'engine_compatibility':copy.deepcopy(ENGINE_COMPATIBILITY),'engine_resource_fingerprint':ENGINE_COMPATIBILITY['resource_fingerprint'],'seeds':seeds,'fixture_me_version':'26.8.0.0','config_hashes':{label:hashlib.sha256((directory/f'{label}.bin').read_bytes()).hexdigest()for label,_ in variants}}
+                    if retest_fixture and provenance_source:provenance['save_source']=provenance_source
                     provenance['event_details']=event_details
                     if pool:
                         provenance['pool']={'profile':pool_summary['profile'],'enabled':True,'salt':key,'uniform':copy.deepcopy(pool_summary['uniform']),
@@ -995,6 +1128,9 @@ class Handler(BaseHTTPRequestHandler):
                     job['initial_state_policy']={'id':'controlled-start-v3','player_values':copy.deepcopy(profiles.CONTROLLED_START),'morale_verified':True,'cohesion_verified':True}
                     job['mode']='comparison'if reference else'single';job['variant_names']={label:item['teams'][0].get('tactic_name','')for label,item in variants}
                     job['team_names']={label:[t['name']for t in item['teams']]for label,item in variants}
+                    if retest_fixture:
+                        job.update(experiment_type='save_opponents',schedule={'B':retest_fixture},
+                                   retest_source={'id':old['id'],'variant':label})
                     if episode:job.update(experiment_type='setpiece_episode',episode_settings=episode)
                     elif pool:
                         job['tactic_pool']={**pool_summary,'draws':{'total':len(pool_draws),'counts':{str(index):0 for index in range(len(pool['entries']))}}}
@@ -1024,14 +1160,19 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     process_owner=own_child_processes()
     p=argparse.ArgumentParser();p.add_argument('--port',type=int,default=8765);args=p.parse_args()
-    for summary in sorted((RUNS).glob('*/summary.json'),reverse=True)[:40]:
+    folders = {p.parent for filename in ('summary.json','summary.pending.json') for p in RUNS.glob('*/'+filename)}
+    for folder in sorted(folders,reverse=True)[:40]:
         try:
+            from desktop_storage import publish_summary
+            pending = folder/'summary.pending.json'
+            summary = pending if pending.exists() and not publish_summary(folder) else folder/'summary.json'
             job=json.loads(summary.read_text(encoding='utf8'))
             if not isinstance(job.get('runs'),list)or not isinstance(job.get('id'),str):continue
             job['_dir']=summary.parent
             if job.get('status')in ('queued','running'):
                 job.update(status='interrupted',error='服务重启，任务未完整完成；已完成比赛仍可查看。',current=None,active=[],eta_seconds=None)
             JOBS[job['id']]=job
+            if summary == pending: persist(job)
         except (ValueError,OSError):continue
     server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
     print(f'FM27 tactics lab: http://127.0.0.1:{args.port}',flush=True)

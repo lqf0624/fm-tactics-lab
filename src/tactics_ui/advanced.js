@@ -44,10 +44,65 @@ function rulesControl(){const host=$('.toolbar-right');if(!host)return;const lab
 const OI_OPTIONS={press:[{id:0,label:'默认'},{id:1,label:'从不'},{id:2,label:'总是'}],mark:[{id:0,label:'默认'},{id:1,label:'从不'},{id:2,label:'总是'}],tackle:[{id:0,label:'默认'},{id:1,label:'正常'},{id:2,label:'谨慎'},{id:3,label:'凶狠'}],foot:[{id:0,label:'不指定'},{id:1,label:'左脚'},{id:2,label:'右脚'},{id:3,label:'弱势脚'}]};
 let oiTab='players';
 function oiControls(row,kind,id){return ['press','mark','tackle','foot'].map(k=>`<td>${select(OI_OPTIONS[k],row[k],`data-oi="${k}" data-kind="${kind}" data-index="${id}"`)}</td>`).join('')}
-function oppositionView(){const opponent=state.teams[1-side],oi=team().opposition;return `${toolbar()}<div class="card"><div class="card-head"><div><h2>${esc(team().name)}的针对性指令</h2><div class="subtitle">设置如何应对 ${esc(opponent.name)}，不是给对方下指令</div></div><div class="segmented"><button data-oi-tab="players" class="${oiTab==='players'?'active':''}">针对球员</button><button data-oi-tab="positions" class="${oiTab==='positions'?'active':''}">针对位置</button></div></div><div class="card-body"><div class="notice">“按球员”使用该球员的单独设置；“按位置”使用其有球位置的设置。名单重排时目标身份保持一致，开赛前由原生函数核对22名对手的有效指令。</div></div><div class="table-scroll"><table class="opposition-table"><thead><tr><th>${oiTab==='players'?'对方球员':'对方位置'}</th>${oiTab==='players'?'<th>采用设置</th>':''}<th>逼抢</th><th>紧逼盯人</th><th>铲抢</th><th>引导至</th></tr></thead><tbody>${oiTab==='players'?opponent.players.map((p,i)=>{const row=oi.players[i];return `<tr><td>${esc(p.name)}<small class="muted"> ${opponent.lineup.includes(i)?'首发':'替补'}</small></td><td>${select([{id:1,label:'按球员'},{id:0,label:'按位置'}],+row.personal,`data-oi="personal" data-kind="players" data-index="${i}"`)}</td>${oiControls(row,'players',i)}</tr>`}).join(''):catalog.positions.map(p=>`<tr><td>${esc(p.id)}</td>${oiControls(oi.positions[p.id],'positions',p.id)}</tr>`).join('')}</tbody></table></div><div class="card-body tiny muted">逼抢、盯人、铲抢与脚向均写入原生针对性指令。按位置的设置对选择了“按位置”的球员生效；不会覆盖选择“按球员”的球员。</div></div>`}
-function setPiecesView(){const t=team();return `${toolbar()}<div class="card"><div class="card-head"><div><h2>队长优先顺序</h2><div class="subtitle">第一名在首发中的候选人作为本场队长；空列表由原生引擎选择</div></div><span class="tag">核对实际队长</span></div><div class="card-body"><div class="captain-list">${t.captains.length?t.captains.map((p,i)=>`<div class="captain-row"><span>${i+1}</span><strong>${esc(t.players[p].name)}</strong><span class="muted tiny">${t.lineup.includes(p)?'首发':'替补'}</span><button class="button small" data-cap-up="${i}" ${i===0?'disabled':''}>↑</button><button class="button small" data-cap-down="${i}" ${i===t.captains.length-1?'disabled':''}>↓</button><button class="button small ghost" data-cap-remove="${i}">移除</button></div>`).join(''):'<p class="muted">原生自动选择</p>'}</div><div class="captain-add">${select([{id:'',label:'选择候选队长…'},...t.players.map((p,i)=>({id:i,label:p.name})).filter(p=>!t.captains.includes(p.id))],'','id="captain-add"')}<button class="button small" id="captain-clear">恢复自动选择</button></div></div></div><div id="setpiece-routines"></div>`}
+let oiOpponentKey=null;
+const oiPreviews=new Map();
+function oiContext(){
+ if(saveMode!=='save')return {opponent:state.teams[1-side],controls:''};
+ const choices=saveOpponents.filter(o=>saveChosen.has(o.key));
+ const selected=choices.find(o=>o.key===oiOpponentKey)||choices[0];
+ const picker='<button class="button small" data-oi-choose>选择存档对手</button>';
+ if(!selected)return {controls:picker,notice:'选择对手后可按球员设置，也可直接设置各位置的指令。'};
+ const id=saveInfo.id,club=saveClub,key=selected.key,token=[id,club,key].join('/');
+ const entry=oiPreviews.get(token);
+ const controls='<label>当前对手 '+select(choices.map(o=>({id:o.key,label:o.name})),key,'data-oi-opponent')+'</label> '+picker;
+ if(!entry){
+  oiPreviews.set(token,{});
+  api('/api/save/preview',{id,club_uid:club,key,scenario:state}).then(async result=>{
+   await refreshPlayerLabels(id,false,selected.club_uid);
+   oiPreviews.set(token,{opponent:result.team});
+  }).catch(e=>oiPreviews.set(token,{error:e.message})).finally(()=>{
+   if(view==='opposition'&&saveMode==='save'&&saveInfo?.id===id&&saveClub===club)render();
+  });
+ }
+ return {controls,opponent:entry?.opponent,notice:entry?.error||'正在读取对手比赛名单',retry:entry?.error?token:null};
+}
+function oppositionView(){
+ const context=oiContext(),opponent=context.opponent,oi=team().opposition,personal=oiTab==='players';
+ const mode=[{id:1,label:'按球员'},{id:0,label:'按位置'}];
+ const rows=personal?(opponent?.players||[]).slice(0,opponent?.roster_size).map((p,i)=>{
+  const slot=opponent.lineup.indexOf(i),uid=p.source_uid;
+  const career=saveMode==='save',kind=career?'by_player_uid':'players',index=career?uid:i;
+  if(career&&uid==null)return '';
+  const prior=career&&state.teams[1].roster_source?.id===saveInfo?.id?state.teams[1].players.findIndex(other=>other.source_uid===uid):-1;
+  const row=career?(oi.by_player_uid?.[uid]||oi.players[prior]||{press:0,mark:0,tackle:0,foot:0,personal:false}):oi.players[i];
+  const position=slot<0?'替补':'首发 · '+desktopPositionNames[opponent.phases[0][slot].position];
+  return `<tr><td><strong>${esc(kitNumber(p,i))}　${esc(displayName(p))}</strong><br><small class="muted">${esc(position)}</small></td><td>${select(mode,+row.personal,`data-oi="personal" data-kind="${kind}" data-index="${index}"`)}</td>${oiControls(row,kind,index)}</tr>`;
+ }).join(''):catalog.positions.map(p=>`<tr><td>${esc(desktopPositionNames[p.id]||p.id)}</td>${oiControls(oi.positions[p.id],'positions',p.id)}</tr>`).join('');
+ return `${toolbar()}<div class="card"><div class="card-head"><div><h2>${esc(team().name)}的针对性指令</h2>${opponent?'<div class="subtitle">对手 · '+esc(opponent.name)+'</div>':''}</div><div class="segmented"><button data-oi-tab="players" class="${personal?'active':''}">针对球员</button><button data-oi-tab="positions" class="${personal?'':'active'}">针对位置</button></div></div><div class="card-body">${context.controls}<p class="tiny muted">按位置的指令对采用该设置的对手生效。选择「按球员」可单独设置逼抢、盯人、铲抢和引导脚向。</p></div>${personal&&!opponent?'<p class="notice">'+esc(context.notice)+(context.retry?' <button class="button small" data-oi-retry="'+esc(context.retry)+'">重新读取</button>':'')+'</p>':`<div class="table-scroll"><table class="opposition-table"><thead><tr><th>${personal?'对方球员':'对方位置'}</th>${personal?'<th>采用设置</th>':''}<th>逼抢</th><th>紧逼盯人</th><th>铲抢</th><th>引导至</th></tr></thead><tbody>${rows}</tbody></table></div>`}</div>`;
+}
+function bindOpposition(){
+ if(view!=='opposition')return;
+ const choose=$('[data-oi-choose]');if(choose)choose.onclick=()=>discoverSaveOpponents();
+ const selectOpponent=$('[data-oi-opponent]');if(selectOpponent)selectOpponent.onchange=e=>{oiOpponentKey=e.target.value;render();};
+ const retry=$('[data-oi-retry]');if(retry)retry.onclick=()=>{oiPreviews.delete(retry.dataset.oiRetry);render();};
+ $$('[data-oi]').forEach(e=>e.onchange=()=>{
+  const {kind,index,oi:key}=e.dataset,settings=team().opposition;
+  if(kind==='by_player_uid')settings.by_player_uid??={};
+  let row=settings[kind][index];
+  if(!row){
+   row=settings[kind][index]={};
+   for(const control of e.closest('tr').querySelectorAll('[data-oi]'))row[control.dataset.oi]=control.dataset.oi==='personal'?!!+control.value:+control.value;
+  }
+  row[key]=key==='personal'?!!+e.value:+e.value;
+  if(kind!=='positions'&&key!=='personal'){
+   row.personal=true;e.closest('tr').querySelector('[data-oi="personal"]').value='1';
+  }
+  save();
+ });
+}
+function setPiecesView(){const t=team();return `${toolbar()}<div class="card"><div class="card-head"><div><h2>队长优先顺序</h2><div class="subtitle">第一名在首发中的候选人作为本场队长；空列表由原生引擎选择</div></div><span class="tag">核对实际队长</span></div><div class="card-body"><div class="captain-list">${t.captains.length?t.captains.map((p,i)=>`<div class="captain-row"><span>${i+1}</span><strong>${esc(displayName(t.players[p]))}</strong><span class="muted tiny">${t.lineup.includes(p)?'首发':'替补'}</span><button class="button small" data-cap-up="${i}" ${i===0?'disabled':''}>↑</button><button class="button small" data-cap-down="${i}" ${i===t.captains.length-1?'disabled':''}>↓</button><button class="button small ghost" data-cap-remove="${i}">移除</button></div>`).join(''):'<p class="muted">原生自动选择</p>'}</div><div class="captain-add">${select([{id:'',label:'选择候选队长…'},...t.players.map((p,i)=>({id:i,label:displayName(p)})).filter(p=>!t.captains.includes(p.id))],'','id="captain-add"')}<button class="button small" id="captain-clear">恢复自动选择</button></div></div></div><div id="setpiece-routines"></div>`}
 render=function(){if(!['opposition','setpieces'].includes(view))return baseRender();$('#page-title').textContent=view==='opposition'?'针对对手，细化比赛计划':'定位球与比赛职责';$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#workspace').innerHTML=view==='opposition'?oppositionView():setPiecesView();bind()};
-bind=function(){baseBind();rulesControl();policyControls();$$('[data-oi-tab]').forEach(b=>b.onclick=()=>{oiTab=b.dataset.oiTab;render()});$$('[data-oi]').forEach(e=>e.onchange=()=>{const row=team().opposition[e.dataset.kind][e.dataset.index];row[e.dataset.oi]=e.dataset.oi==='personal'?!!+e.value:+e.value;save()});$$('[data-cap-remove]').forEach(b=>b.onclick=()=>{team().captains.splice(+b.dataset.capRemove,1);save();render()});for(const [tag,diff]of [['up',-1],['down',1]])$$(`[data-cap-${tag}]`).forEach(b=>b.onclick=()=>{const i=+b.dataset[tag==='up'?'capUp':'capDown'],a=team().captains;[a[i],a[i+diff]]=[a[i+diff],a[i]];save();render()});if($('#captain-add'))$('#captain-add').onchange=e=>{if(e.target.value!==''){team().captains.push(+e.target.value);save();render()}};if($('#captain-clear'))$('#captain-clear').onclick=()=>{team().captains=[];save();render()}};
+bind=function(){baseBind();rulesControl();policyControls();$$('[data-oi-tab]').forEach(b=>b.onclick=()=>{oiTab=b.dataset.oiTab;render()});bindOpposition();$$('[data-cap-remove]').forEach(b=>b.onclick=()=>{team().captains.splice(+b.dataset.capRemove,1);save();render()});for(const [tag,diff]of [['up',-1],['down',1]])$$(`[data-cap-${tag}]`).forEach(b=>b.onclick=()=>{const i=+b.dataset[tag==='up'?'capUp':'capDown'],a=team().captains;[a[i],a[i+diff]]=[a[i+diff],a[i]];save();render()});if($('#captain-add'))$('#captain-add').onchange=e=>{if(e.target.value!==''){team().captains.push(+e.target.value);save();render()}};if($('#captain-clear'))$('#captain-clear').onclick=()=>{team().captains=[];save();render()}};
 const renderConstrained=render;render=function(){if(state){const before=JSON.stringify(state.teams.map(t=>[t.phases,t.instructions]));const legacy=state.rules!=='game';state.rules='game';harmonizeAll();if(legacy||before!==JSON.stringify(state.teams.map(t=>[t.phases,t.instructions]))){save();toast('已按位置与角色规则调整不适用的选项，保留球员属性与其他配置')}}return renderConstrained()};
 for(const [name,label,symbol]of [['opposition','针对性指令','◎'],['setpieces','定位球与职责','⚑']]){const b=document.createElement('button');b.dataset.view=name;b.innerHTML=`${symbol} <span>${label}</span>`;b.onclick=()=>{view=name;render();window.scrollTo(0,0)};$('.rail nav').insertBefore(b,$('[data-view="results"]'))}
 const TAKER_TYPES=[['penalties','点球'],['corners','角球'],['direct_free_kicks','直接任意球'],['wide_free_kicks','边路任意球'],['deep_free_kicks','对方半场任意球'],['throw_ins','进攻界外球']];
@@ -56,7 +111,7 @@ const takerByFoot=()=>['corners','wide_free_kicks'].includes(takerType);
 const takerKey=()=>takerType==='penalties'?takerType:`${takerType}_${takerByFoot()?takerFoot:takerFoot.replace('_foot','_side')}`;
 function takersView(){
  const t=team();t.takers??=clone(defaults.teams[side].takers);const list=t.takers[takerKey()];
- return `<div class="card"><div class="card-head"><div><h2>定位球主罚优先顺序</h2><div class="subtitle">比赛中的原生主罚选择函数读取此名单；未设置时按原生属性与场景选择</div></div></div><div class="card-body"><div class="preset-row">${select(TAKER_TYPES.map(([id,label])=>({id,label})),takerType,'id="taker-type"')}${takerType==='penalties'?'':select([{id:'left_foot',label:takerByFoot()?'左脚主罚名单':'左侧主罚名单'},{id:'right_foot',label:takerByFoot()?'右脚主罚名单':'右侧主罚名单'}],takerFoot,'id="taker-foot"')}</div><p class="notice">角球和边路任意球按出球脚分组，直接任意球、对方半场任意球和进攻界外球按球所在侧分组。防守／中场界外球和本方半场任意球保留原生常规选择。引擎还会判断球员是否在场、是否可用；替补仍可列入候选。</p><div class="captain-list">${list.map((p,i)=>`<div class="captain-row"><span>${i+1}</span><strong>${esc(t.players[p].name)}</strong><span class="muted tiny">${t.lineup.includes(p)?'首发':'替补'}</span><button class="button small" data-taker-up="${i}" ${i?'':'disabled'}>↑</button><button class="button small" data-taker-down="${i}" ${i===list.length-1?'disabled':''}>↓</button><button class="button small ghost" data-taker-remove="${i}">移除</button></div>`).join('')||'<p class="muted">原生自动选择</p>'}</div><div class="captain-add">${select([{id:'',label:'选择主罚候选人…'},...t.players.map((p,i)=>({id:i,label:p.name})).filter(p=>!list.includes(p.id))],'','id="taker-add"')}<button class="button small" id="taker-clear">恢复自动选择</button></div></div></div>`;
+ return `<div class="card"><div class="card-head"><div><h2>定位球主罚优先顺序</h2><div class="subtitle">比赛中的原生主罚选择函数读取此名单；未设置时按原生属性与场景选择</div></div></div><div class="card-body"><div class="preset-row">${select(TAKER_TYPES.map(([id,label])=>({id,label})),takerType,'id="taker-type"')}${takerType==='penalties'?'':select([{id:'left_foot',label:takerByFoot()?'左脚主罚名单':'左侧主罚名单'},{id:'right_foot',label:takerByFoot()?'右脚主罚名单':'右侧主罚名单'}],takerFoot,'id="taker-foot"')}</div><p class="notice">角球和边路任意球按出球脚分组，直接任意球、对方半场任意球和进攻界外球按球所在侧分组。防守／中场界外球和本方半场任意球保留原生常规选择。引擎还会判断球员是否在场、是否可用；替补仍可列入候选。</p><div class="captain-list">${list.map((p,i)=>`<div class="captain-row"><span>${i+1}</span><strong>${esc(displayName(t.players[p]))}</strong><span class="muted tiny">${t.lineup.includes(p)?'首发':'替补'}</span><button class="button small" data-taker-up="${i}" ${i?'':'disabled'}>↑</button><button class="button small" data-taker-down="${i}" ${i===list.length-1?'disabled':''}>↓</button><button class="button small ghost" data-taker-remove="${i}">移除</button></div>`).join('')||'<p class="muted">原生自动选择</p>'}</div><div class="captain-add">${select([{id:'',label:'选择主罚候选人…'},...t.players.map((p,i)=>({id:i,label:displayName(p)})).filter(p=>!list.includes(p.id))],'','id="taker-add"')}<button class="button small" id="taker-clear">恢复自动选择</button></div></div></div>`;
 }
 const captainView=setPiecesView;setPiecesView=function(){return captainView().replace('<div id="setpiece-routines"></div>',takersView()+'<p class="notice">本场使用样本原版定位球套路。套路站位、跑动、发球策略和使用频率尚未开放编辑。</p>')};
 const bindAdvanced=bind;bind=function(){bindAdvanced();

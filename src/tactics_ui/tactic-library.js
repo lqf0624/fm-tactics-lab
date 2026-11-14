@@ -77,7 +77,7 @@ function libraryReportBody(report){
   const has=team.real===true||(team.variants||[]).some(item=>item.source==='real_ai');
   return `<td class="tiny"><button type="button" class="button small" data-real-tactic="${team.club_uid}" ${reading?'disabled':''}>${has?'重新生成':'生成'}</button></td>`;
  };
- const rows=teams.map(team=>`<tr><td>${esc(team.name||'')}</td><td>${esc(team.coach_name||'—')}</td><td>${libraryVariant(team,1)}</td><td>${libraryVariant(team,2)}</td><td class="tiny muted">${team.error?esc(team.error):team.available===false?'暂不可用':'可用'}</td>${real(team)}</tr>`).join('');
+ const rows=teams.map(team=>`<tr><td>${esc(team.name||'')}</td><td>${esc(team.coach_name||'—')}</td><td>${libraryVariant(team,1)}</td><td>${libraryVariant(team,2)}</td><td class="tiny muted">${team.error?esc(team.error):team.available===false?'暂不可用':team.coach_assignment==='assistant_fallback'?esc(team.preference_label):'可用'}</td>${real(team)}</tr>`).join('');
  const head=own?'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th><th>真实战术</th>':'<th>球队</th><th>教练</th><th>第一套</th><th>第二套</th><th>状态</th>';
  const table=teams.length?`<div class="table-scroll"><table class="library-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`:`<p class="tiny muted">没有找到对手球队</p>`;
  const details=failures.length?`<details><summary>失败 ${failures.length} 项</summary>${failures.map(f=>`<p class="tiny">${esc(f.name||'')}：${esc(f.error||'读取失败')}</p>`).join('')}</details>`:'';

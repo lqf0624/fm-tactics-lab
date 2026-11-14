@@ -1,5 +1,16 @@
 # Changelog
 
+## v1114.6 · 2026-11-14
+
+- Read save-specific player display names and registered shirts, including active loans; bind opposition instructions and historical events to player identity.
+- Select clubs and opponents across the loaded top five leagues using current-season membership.
+- Add independent screening/retest rounds, per-round results and CSV fields, opposition neutralization, and cancellation/resume validation.
+- Resolve referenced first-team coaches and documented assistant fallbacks; reject ambiguous or unverifiable staff.
+- Preserve completed work when Windows temporarily blocks summary replacement and discard stale squad/opponent responses.
+- Fix the opponent-picker click handler, remap personal instructions when replacing a roster, and keep paired A/B statistics scoped to the active round.
+- Include product, backup-boundary and portability documentation. Full user-data backup/restore remains planned.
+- Retain the official data directory in public source builds; align source/package version metadata with v1114.6. This source update does not publish an EXE.
+
 ## v1113.1 · 2026-11-13
 
 - Register the save layout for `27.0.1+2503222`.
