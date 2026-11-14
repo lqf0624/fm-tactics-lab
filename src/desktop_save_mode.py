@@ -1119,7 +1119,7 @@ class SaveLibrary:
                 player.pop('source_uid', None)
                 player['name'] = '未入比赛名单'
         team['name'] = info.get('short_name') or info['name']
-        team['roster_source'] = {'id':key,'club_uid':club}
+        desktop_static_plans.bind_source(team,key,club)
         team['setpieces']['role_priorities'] = {k: [] for k in team['setpieces']['role_priorities']}
         scenario['teams'][side] = team
         return self.app.validate_scenario(scenario)['teams'][side]
@@ -1166,7 +1166,7 @@ class SaveLibrary:
         team.update(captains=[],takers={k:[] for k in app.TAKER_KEYS},tactic_name=tactic['name'])
         c=next(c for c in data['clubs'] if c['uid']==club)
         team['name']=c.get('short_name') or c['name']
-        team['roster_source'] = {'id':key,'club_uid':club}
+        desktop_static_plans.bind_source(team,key,club)
         result=self.select_squad(scenario,side,selected,substitutes or [],initial=True)
         setpiece_notice=f'已载入 {setpiece_count} 套存档定位球套路。' if setpiece_count else '定位球套路沿用战术板设置。'
         return {'scenario':result,'source':{'save_id':key,'club_uid':club,'date':data['date'],

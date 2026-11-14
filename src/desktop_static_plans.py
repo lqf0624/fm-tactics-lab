@@ -8,6 +8,13 @@ def read(path):
     return json.loads(path.read_text(encoding='utf8'))
 
 
+def bind_source(team, key, club):
+    """UID overrides belong to one save, including when a club is reloaded."""
+    if (team.get('roster_source') or {}).get('id') != key:
+        team.get('opposition', {}).pop('by_player_uid', None)
+    team['roster_source'] = {'id': key, 'club_uid': club}
+
+
 def roster(lib,key,club,team,preferred=()):
     """Use real current members; historical or exact match-day XI is optional."""
     folder=lib.folder(key);lib.ensure_rosters(folder,[club])
@@ -37,5 +44,6 @@ def roster(lib,key,club,team,preferred=()):
         person=allowed[uid];values,profile=lib.player_values(person)
         team['players'][i].update(name=person['name'],source_uid=uid,attributes=values,native_profile=profile)
     for player in team['players'][len(uids):]:player.pop('source_uid',None);player['name']='未入比赛名单'
-    team.update(roster_source={'id':key,'club_uid':club},lineup=list(range(11)),roster_size=len(uids),captains=[],takers={k:[] for k in lib.app.TAKER_KEYS})
+    bind_source(team,key,club)
+    team.update(lineup=list(range(11)),roster_size=len(uids),captains=[],takers={k:[] for k in lib.app.TAKER_KEYS})
     return team

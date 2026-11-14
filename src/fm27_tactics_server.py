@@ -514,10 +514,11 @@ def match_opposition(owner, previous_opponent, opponent, save_id):
     """Bind career instructions to each real opponent before swapping venues."""
     oi = owner['opposition']
     previous = {}
-    if (previous_opponent.get('roster_source') or {}).get('id') == save_id:
+    same_save = (owner.get('roster_source') or {}).get('id') == save_id
+    if same_save and (previous_opponent.get('roster_source') or {}).get('id') == save_id:
         previous = {p['source_uid']:row for p,row in zip(previous_opponent['players'],oi['players'])
                     if p.get('source_uid') is not None}
-    overrides = oi.get('by_player_uid',{})
+    overrides = oi.get('by_player_uid',{}) if same_save else {}
     by_position = unpack_oi(0)
     oi['players'] = [
         overrides.get(str(p.get('source_uid')),previous.get(p.get('source_uid'),by_position)).copy()
@@ -939,6 +940,7 @@ class Handler(BaseHTTPRequestHandler):
             if not 0<length<=(8000000 if urlparse(self.path).path in ('/api/import-fmf','/api/pool/import-fmf','/api/save/league-pool')else 1500000):raise ValueError('请求大小无效')
             data=json.loads(self.rfile.read(length));path=urlparse(self.path).path
             retest_fixture = None
+            retest_source = None
             if path=='/api/jobs/retest':
                 with LOCK:
                     old = JOBS.get(data.get('id'))
@@ -946,6 +948,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not old or old.get('experiment_type') != 'save_opponents' or label not in old.get('schedule', {}):
                         raise ValueError('请选择存档对战中的一场比赛')
                     spec = old['schedule'][label]
+                    retest_source = {'id':old['id'],'variant':label}
                     provenance = json.loads((old['_dir']/'provenance.json').read_text(encoding='utf8'))
                     snapshot = json.loads((old['_dir']/f'{label}.json').read_text(encoding='utf8'))
                     if hashlib.sha256(encode_scenario(snapshot)).hexdigest() != provenance['config_hashes'][label]:
@@ -1130,7 +1133,7 @@ class Handler(BaseHTTPRequestHandler):
                     job['team_names']={label:[t['name']for t in item['teams']]for label,item in variants}
                     if retest_fixture:
                         job.update(experiment_type='save_opponents',schedule={'B':retest_fixture},
-                                   retest_source={'id':old['id'],'variant':label})
+                                   retest_source=retest_source)
                     if episode:job.update(experiment_type='setpiece_episode',episode_settings=episode)
                     elif pool:
                         job['tactic_pool']={**pool_summary,'draws':{'total':len(pool_draws),'counts':{str(index):0 for index in range(len(pool['entries']))}}}

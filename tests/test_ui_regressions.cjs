@@ -41,3 +41,35 @@ function paired(second){
 }
 test('paired result uses independent retest scores once retest starts',()=>{const html=paired(true);assert.match(html,/Retest/);assert.match(html,/<td>2.00<\/td><td>0.00<\/td><td>-2.00<\/td><td>1<\/td>/);});
 test('paired result keeps first round before retest starts',()=>{const html=paired(false);assert.match(html,/First round/);assert.match(html,/<td>0.00<\/td><td>10.00<\/td><td>\+10.00<\/td><td>1<\/td>/);});
+
+test('opening a legacy real-player draft preserves edits across repeated initialization',async()=>{
+ const own=team([1,2]);delete own.roster_source;own.lineup=[1,0];own.players[0].attributes=[99];
+ const initial=structuredClone(own),stored=new Map();let reads=0;
+ const c=context({state:{teams:[own,team([8,9])]},saveMode:'free',saveClub:null,saveInfo:null,
+  localStorage:{getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value)},
+  refreshPlayerLabels:async()=>{},save(){stored.set('draft',JSON.stringify(c.state));},showActionError:(_,e)=>assert.fail(e),
+  api:async url=>{if(url.endsWith('board-clubs'))return {id:'save',own:1,opponent:null,clubs:[{uid:1,name:'Club'}]};reads++;return team([3,4]);}});
+ vm.runInContext(fragment('desktop-workspace.js','let boardRosterSource'),c);
+ await c.initializeBoardRoster();await c.initializeBoardRoster();
+ assert.deepEqual(c.state.teams[0],initial);assert.equal(reads,0);assert.equal(stored.has('draft'),false);
+});
+
+test('loading a different save clears the loaded teams UID overrides',()=>{
+ const own=team([1,2],'old-save'),other=team([9,10],'old-save');
+ own.opposition.by_player_uid={'999':{press:2,mark:0,tackle:0,foot:0,personal:true}};
+ const c=context({state:{teams:[own,other]}});
+ vm.runInContext(fragment('desktop-workspace.js','let boardRosterSource'),c);
+ const loaded=structuredClone(own);loaded.roster_source.id='new-save';
+ c.replaceBoardRoster(c.state,0,loaded);
+ assert.equal(c.state.teams[0].opposition.by_player_uid,undefined);
+ assert.equal(c.state.teams[0].opposition.positions.GK.press,2);
+});
+
+test('same-save roster reload preserves explicit UID overrides',()=>{
+ const own=team([1,2]),other=team([9,10]);
+ own.opposition.by_player_uid={'999':{press:2,mark:0,tackle:0,foot:0,personal:true}};
+ const c=context({state:{teams:[own,other]}});
+ vm.runInContext(fragment('desktop-workspace.js','let boardRosterSource'),c);
+ c.replaceBoardRoster(c.state,0,structuredClone(own));
+ assert.equal(c.state.teams[0].opposition.by_player_uid['999'].press,2);
+});

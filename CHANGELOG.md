@@ -8,6 +8,7 @@
 - Resolve referenced first-team coaches and documented assistant fallbacks; reject ambiguous or unverifiable staff.
 - Preserve completed work when Windows temporarily blocks summary replacement and discard stale squad/opponent responses.
 - Fix the opponent-picker click handler, remap personal instructions when replacing a roster, and keep paired A/B statistics scoped to the active round.
+- Preserve unbound legacy roster drafts on startup, clear player-specific overrides when changing saves, and retain the original fixture identity in retest summaries.
 - Include product, backup-boundary and portability documentation. Full user-data backup/restore remains planned.
 - Retain the official data directory in public source builds; align source/package version metadata with v1114.6. This source update does not publish an EXE.
 

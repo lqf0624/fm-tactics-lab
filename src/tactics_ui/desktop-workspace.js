@@ -65,7 +65,10 @@ function replaceBoardRoster(scenario,side,loaded){
   const old=prior.get(uid(loaded,i));
   return old!=null&&settings[old]?{...settings[old]}:{press:0,mark:0,tackle:0,foot:0,personal:false};
  });
- if(!sameSave)delete markers.opposition.by_player_uid;
+ if(!sameSave){
+  delete markers.opposition.by_player_uid;
+  delete loaded.opposition.by_player_uid;
+ }
  const order=t=>t.lineup.concat(t.players.map((_,i)=>i).filter(i=>!t.lineup.includes(i)));
  const before=order(previous),after=order(loaded);
  for(const cell of markers.phases.flat()){
@@ -92,6 +95,9 @@ async function initializeBoardRoster(){
   for(const [side,defaultClub] of sides.entries()){
    const existing=scenario.teams[side],binding=existing.roster_source;
    const oldRoster=existing.players.some(p=>p.source_uid!=null);
+   // Legacy drafts have no proven save binding. Only an explicit roster load
+   // may replace their edited players, lineup and attributes.
+   if(oldRoster&&!binding)continue;
    const sameSource=binding?.id===source.id;
    if(sameSource)await refreshPlayerLabels(source.id,false,binding.club_uid);
    if(!sampleNames(existing,side)&&(!oldRoster||sameSource&&(mode==='free'||binding.club_uid===source.own)))continue;
@@ -99,10 +105,6 @@ async function initializeBoardRoster(){
    const previous=mode==='free'&&source.clubs.find(c=>binding?c.uid===binding.club_uid:c.name===existing.name);
    const uid=previous?previous.uid:defaultClub;
    if(uid==null)continue;
-   // Attach provenance to an old same-save draft without disturbing manual lineup edits.
-   if(!binding&&oldRoster&&previous&&localStorage.getItem('fm27-roster-save-'+mode)===source.id){
-    existing.roster_source={id:source.id,club_uid:uid};save();continue;
-   }
    const before=JSON.stringify(scenario.teams[side]);
    const team=await fetchBoardTeam(source,side,uid,scenario);
    if(state!==scenario||saveMode!==mode||boardRosterSource!==source||mode==='save'&&(saveInfo?.id!==requested||saveClub!==managed))return;
@@ -110,7 +112,6 @@ async function initializeBoardRoster(){
    replaceBoardRoster(scenario,side,team);
    save();
   }
-  localStorage.setItem('fm27-roster-save-'+mode,source.id);
  }catch(e){showActionError('载入存档球员失败',e.message);}
 }
 function bindBoardRosterControls(){
