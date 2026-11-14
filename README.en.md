@@ -62,7 +62,7 @@ Coach references and preferences are validated. AI teams with unverifiable coach
 
 The app can use the existing `%LOCALAPPDATA%\FM27TacticsDesktop` data folder or a folder you choose at startup or in Settings. Steam native matches were validated. Epic adapter selection was checked in the unified package.
 
-Open **Attribute Lab** from the tactics board to test individual attribute increases for selected starters. It pairs matches on the same seeds and uses a fresh seed set to validate shortlisted changes. Use the current opponent, selected career-save opponents, or the away tactic pool. Compare xG difference and effect per attribute point, then export an HTML report. The role-attribute research originated in [PR #18](https://github.com/lqf0624/fm-tactics-lab/pull/18).
+Open **Attribute Lab** from the tactics board to test individual attribute increases for selected starters. It pairs matches on the same seeds and uses a fresh seed set to validate shortlisted changes. In career-save mode, open **Select save opponents** inside Attribute Lab to filter clubs by league and mix up to 120 available opponents from the five major leagues in one batch. In Free Simulation, use the current opponent or the away tactic pool. Compare xG difference and effect per attribute point, then export an HTML report. The role-attribute research originated in [PR #18](https://github.com/lqf0624/fm-tactics-lab/pull/18).
 
 ## Career-save matches
 

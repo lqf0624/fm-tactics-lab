@@ -429,6 +429,10 @@ def experiment_name(value, fallback):
         raise ValueError('实验名称须为1–100个可读字符')
     return value.strip()
 
+MAX_SAVE_OPPONENTS = 120
+MAX_ATTRIBUTE_MATCHES = 100000
+
+
 def create_save_job(data):
     desktop_engine.require_available(ENGINE_COMPATIBILITY)
     if SAVE_LIBRARY.real_active: raise ValueError('请等待真实AI战术生成完成')
@@ -438,8 +442,8 @@ def create_save_job(data):
     if enabled_pool(scenario)or enabled_pool(reference):raise ValueError('随机客队战术池仅支持自由推演，存档对战不可用')
     own=integer(data.get('club_uid'),0,0xffffffff,'己方球队')
     selected=data.get('opponents')
-    if not isinstance(selected,list) or not 1<=len(selected)<=120 or len({v['key'] for v in selected})!=len(selected):
-        raise ValueError('请选择1–120个不重复的真实对手方案')
+    if not isinstance(selected,list) or not 1<=len(selected)<=MAX_SAVE_OPPONENTS or len({v['key'] for v in selected})!=len(selected):
+        raise ValueError(f'请选择1–{MAX_SAVE_OPPONENTS}个不重复的真实对手方案')
     count=integer(data.get('count'),2,10000,'每队场数')
     if count%2: raise ValueError('主客场各半时，每队场数必须为偶数')
     two_rounds=data.get('two_rounds',False)
@@ -689,8 +693,8 @@ def prepare_attribute_screen(data,scenario,seeds):
         if side!=0 or scenario['teams'][0].get('roster_source')!={'id':save_id,'club_uid':own}:
             raise ValueError('己方阵容与所选存档或球队不一致，请重新载入')
         keys=data.get('opponents')
-        if not isinstance(keys,list) or not 1<=len(keys)<=8 or any(not isinstance(key,str) for key in keys) or len(keys)!=len(set(keys)):
-            raise ValueError('属性实验请选择 1–8 支不重复的存档对手')
+        if not isinstance(keys,list) or not 1<=len(keys)<=MAX_SAVE_OPPONENTS or any(not isinstance(key,str) for key in keys) or len(keys)!=len(set(keys)):
+            raise ValueError(f'属性实验请选择 1–{MAX_SAVE_OPPONENTS} 支不重复的存档对手')
         if not SAVE_LIBRARY.folder(save_id).is_dir():
             raise ValueError('找不到存档，请重新读取')
         report=SAVE_LIBRARY.inspect_opponents(save_id,own)
@@ -727,13 +731,12 @@ def prepare_attribute_screen(data,scenario,seeds):
     max_attributes=sum((len(attribute_analysis.FIELD_ATTRIBUTES) +
         (len(attribute_analysis.KEEPER_ATTRIBUTES) if scenario['teams'][side]['phases'][0][slot]['position']=='GK' else 0))
         if broad else 4 for slot in slots)
-    if standard_levels and 2*max_attributes*len(standard_levels)*len(opponents)*len(seeds)>100000:
+    if standard_levels and 2*max_attributes*len(standard_levels)*len(opponents)*len(seeds)>MAX_ATTRIBUTE_MATCHES:
         raise ValueError('单次分析超过十万场，请减少位置、对手或场数')
     variants,cases=attribute_analysis.research_variants(opponents,side,slots,attributes,broad,attribute_increase,standard_levels)
     if not cases:raise ValueError('所选位置的测试属性均已达到20，请降低分析范围或选择其他球员')
     included_slots={case['slot'] for case in cases}
     slots=[slot for slot in slots if slot in included_slots]
-    if len(variants)*len(seeds)>100000:raise ValueError('单次分析超过十万场，请减少位置、对手或场数')
     details={'schema':2,'side':side,'cases':cases,'seed_count':len(seeds)-discovery_count,'tested_slots':slots,
         'exploration_seeds':seeds[:discovery_count],'validation_seeds':seeds[discovery_count:],
         'attribute_scope':'broad'if broad else'roles','opponent_names':[name for name,_ in opponents],
@@ -743,6 +746,8 @@ def prepare_attribute_screen(data,scenario,seeds):
         'candidate_limit':candidate_limit,'recommendation_limit':recommendation_limit,'validation_mode':validation_mode,
         'profile_mode':profile_mode,'standard_levels':standard_levels or[],
         'selection_policy':'dual_v1','stable_min_pairs':stable_min_pairs}
+    if attribute_analysis.planned_matches(details,len(variants))>MAX_ATTRIBUTE_MATCHES:
+        raise ValueError('单次分析超过十万场，请减少位置、对手或场数')
     stored=copy.deepcopy(scenario);stored.pop('away_tactic_pool',None)
     return variants,details,stored
 

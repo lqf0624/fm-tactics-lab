@@ -14,12 +14,10 @@ async function openAttributeScreen() {
  dialog.className = 'save-dialog attribute-dialog';
  dialog.setAttribute('aria-labelledby','attribute-dialog-title');
  const career=saveMode==='save';
- const selected=career?saveOpponents.filter(row=>saveChosen.has(row.key)&&row.available):[];
+ const saveId=saveInfo?.id, clubId=saveClub;
+ let selected=career?saveOpponents.filter(row=>saveChosen.has(row.key)&&row.available):[];
  if(career&&(!saveLoaded||saveLoaded.save_id!==saveInfo?.id||saveLoaded.club_uid!==saveClub)){
   toast('请先将所选球队载入战术板');return;
- }
- if(career&&(!selected.length||selected.length>8)){
-  toast('请先在存档对手中选择 1–8 支球队');return;
  }
  const sides = editableTeamSides();
  const initialSide=sides.includes(side)?side:sides[0];
@@ -35,7 +33,7 @@ async function openAttributeScreen() {
    <label>属性范围 <select data-screen-scope><option value="roles">角色候选（快速试跑）</option><option value="broad">广泛筛选：外场 30 项，门将 39 项</option></select></label>
    <label>属性提升点数 <input data-screen-increase type="number" min="1" max="19" step="1" value="3" required></label>
    </div>
-   ${career?`<p class="tiny muted">存档对手 · <span translate="no">${selected.map(o=>esc(o.name)).join('、')}</span></p>`:`<label>对手范围 <select data-screen-opponents><option value="current">当前固定对手</option><option value="pool">客队战术池全部战术（2–8 套，仅分析主队）</option></select></label>`}
+   ${career?`<div class="save-team-controls"><button class="button small" type="button" data-screen-pick>选择存档对手</button><span class="tiny" data-screen-opponent-count aria-live="polite"></span></div><details data-screen-opponent-list hidden><summary>已选球队</summary><p class="tiny muted" data-screen-opponent-names translate="no"></p></details>`:`<label>对手范围 <select data-screen-opponents><option value="current">当前固定对手</option><option value="pool">客队战术池全部战术（2–8 套，仅分析主队）</option></select></label>`}
    <div class="attribute-options">
    <label>探索配对场数 <input data-screen-discovery type="number" min="4" max="100" step="1" value="4" required></label>
    <label>独立验证配对场数 <input data-screen-count type="number" min="2" max="200" step="1" value="4" required></label>
@@ -60,6 +58,7 @@ async function openAttributeScreen() {
     <button type="submit" class="button primary">开始分析</button></div>
   </form>`;
  const get = name => dialog.querySelector(`[data-screen-${name}]`);
+ const submit=dialog.querySelector('button[type="submit"]');
  const slotInputs = () => [...get('slots').querySelectorAll('[data-screen-slot]')];
  const selectedSlots = () => attributeCheckedSlots(get('slots'));
  const syncAllSlots = () => {
@@ -83,7 +82,9 @@ async function openAttributeScreen() {
  const estimate = () => {
   const team = state.teams[Number(get('side').value)];
   const slots = selectedSlots();
+  submit.disabled=!slots.length || (career&&!selected.length);
   if (!slots.length) {get('estimate').textContent='请至少勾选一个首发位置。';return;}
+  if (career&&!selected.length) {get('estimate').textContent='请选择存档对手';return;}
   const attributeCounts=slots.map(slot=>get('scope').value==='roles'?4:team.phases[0][slot].position==='GK'?39:30);
   const attributes = attributeCounts.reduce((sum,value)=>sum+value,0);
   const opponents = career ? selected.length : get('opponents').value==='pool' ? poolEntries.length : 1;
@@ -111,6 +112,39 @@ async function openAttributeScreen() {
  get('count').oninput = estimate;
  get('scope').onchange = get('discovery').oninput = estimate;
  if(!career)get('opponents').onchange=estimate;
+ else{
+  const refresh=()=>{
+   get('opponent-count').textContent=`已选 ${selected.length} 队`;
+   get('opponent-list').hidden=!selected.length;
+   get('opponent-names').textContent=selected.map(row=>row.name).join('、');
+   estimate();
+  };
+  get('pick').onclick=async()=>{
+   const button=get('pick');
+   button.disabled=true;
+   get('status').textContent='';
+   try{
+    let report;
+    do{
+     report=await api('/api/save/opponents',{id:saveId,club_uid:clubId});
+     if(!dialog.open||saveMode!=='save'||saveId!==saveInfo?.id||clubId!==saveClub)return;
+     if(report.status==='error')throw Error(report.stage);
+     if(report.status==='reading'){
+      get('status').textContent=report.stage||'正在读取存档对手';
+      await new Promise(resolve=>setTimeout(resolve,1200));
+     }
+    }while(report.status==='reading');
+    get('status').textContent='';
+    showSaveOpponents(report,{initial:new Set(selected.map(row=>row.key)),scope:'all',
+     onAccept:keys=>{
+      selected=report.opponents.filter(row=>row.available&&keys.has(row.key));
+      refresh();
+     }});
+   }catch(error){get('status').textContent=error.message;}
+   finally{button.disabled=false;}
+  };
+  refresh();
+ }
  get('validation-mode').onchange=get('levels').oninput=estimate;
  get('profile-mode').onchange=()=>{get('levels-row').hidden=get('profile-mode').value!=='standard';estimate();};
  get('candidates').oninput = () => { get('recommendations').max=get('candidates').value; estimate(); };
@@ -118,6 +152,7 @@ async function openAttributeScreen() {
  dialog.addEventListener('close', () => dialog.remove(), {once: true});
  dialog.querySelector('form').onsubmit = async event => {
   event.preventDefault();
+  if(career&&(!selected.length||saveMode!=='save'||saveId!==saveInfo?.id||clubId!==saveClub))return;
   const discovery = Number(get('discovery').value);
   const count = discovery + Number(get('count').value);
   const first = Number(get('seed').value);
@@ -134,7 +169,7 @@ async function openAttributeScreen() {
    const response = await api('/api/run-attribute-screen', {
     scenario: clone(state), side: Number(get('side').value), slots,
     exploration_count: discovery, attribute_scope: get('scope').value,
-    ...(career?{save_id:saveInfo.id,club_uid:saveClub,opponents:selected.map(o=>o.key)}:{opponents:get('opponents').value}),
+    ...(career?{save_id:saveId,club_uid:clubId,opponents:selected.map(o=>o.key)}:{opponents:get('opponents').value}),
     attribute_increase: Number(get('increase').value),
     validation_mode:get('validation-mode').value,profile_mode:get('profile-mode').value,
     standard_levels:standardLevels,

@@ -1,5 +1,13 @@
 // English presentation catalogue. Keys are source UI phrases, never native IDs.
 window.FM27English = {
+ "请选择存档对手": "Select a save opponent",
+ "已选球队": "Selected clubs",
+ "正在读取存档对手": "Reading save opponents",
+ "可以选择同联赛或其他已加载联赛的球队": "Select clubs from the same league or another loaded league",
+ "电脑球队使用已核实的主教练偏好预设": "AI clubs use verified manager presets",
+ "单次分析超过十万场": "This analysis exceeds 100,000 matches",
+ "请减少位置": "Reduce the number of positions",
+ "对手或场数": "opponents, or matches",
  "逐项调整属性": "Change one attribute at a time",
  "用同种子比赛比较": "compare on the same seeds",
  "再用新种子复测": "then retest on fresh seeds",
