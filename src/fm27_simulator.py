@@ -7,6 +7,7 @@ from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
+from desktop_storage import write_json_atomic
 import subprocess
 import sys
 import time
@@ -129,14 +130,14 @@ def main() -> int:
                 summary['failures'].append(result);return
             run=inspect_log(output/result['log']);run['elapsed_seconds']=result['elapsed_seconds'];run['timings']=result['timings'];run['attempts']=result['attempts'];summary['runs'].append(run)
             summary['runs'].sort(key=lambda r:r['seed']['effective_seed'])
-            temporary=summary_path.with_suffix('.tmp');temporary.write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf8');temporary.replace(summary_path)
+            write_json_atomic(summary_path,summary)
             print(f"seed={run['seed']['effective_seed']} score={run['result']['score']} seconds={run['elapsed_seconds']}",flush=True)
         started=time.perf_counter();BatchRunner(ROOT,args.workers).run(tasks,completed);summary['wall_seconds']=round(time.perf_counter()-started,3)
         if summary['failures']:summary['error']=f"{len(summary['failures'])} matches failed after retry"
     except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
         summary["error"] = str(error)
     finally:
-        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomic(summary_path,summary)
     print(summary_path)
     if "error" in summary:
         print(summary["error"], file=sys.stderr)

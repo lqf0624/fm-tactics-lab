@@ -5,7 +5,7 @@ import desktop_static_plans
 from desktop_coach_prepare import FRAGMENT_DIRECTORY, LEAGUE_PROFILE, PROFILE as STAFF_PROFILE
 from desktop_storage import bounded_output
 
-PROFILE='coach-preference-original-preset-v8'
+PROFILE='coach-preference-original-preset-v11'
 STYLE_NAMES={0:'控制球权',1:'高位逼抢',2:'密集短传',3:'纵向短传渗透',4:'边路进攻',
              5:'长传冲吊',6:'流畅反击',7:'直接反击',8:'链式防守',9:'摆大巴'}
 
@@ -13,7 +13,7 @@ def read(path):return json.loads(path.read_text(encoding='utf8'))
 def digest(value):return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
 
 def binding(lib,folder):
-    return {'profile':PROFILE,'source_sha256':lib.index_data(folder)['source_sha256'],
+    return {'profile':PROFILE,'staff_profile':LEAGUE_PROFILE,'source_sha256':lib.index_data(folder)['source_sha256'],
             'engine':read(folder/'native_binding.json')}
 
 def assets(lib,folder):
@@ -53,7 +53,10 @@ def formation_name(lib,positions):
 
 def describe(lib,t):
     match=t['formation_match']
-    suffix='双阶段精确匹配'if match['primary_exact']and match['secondary_exact']else'按同风格最接近阵型匹配'
+    if match.get('selection_policy')=='registered_shapes_then_stable_index':
+        quality='主偏好阵型精确匹配' if match['primary_exact'] else '最接近主偏好阵型'
+        return f"助教风格未设置 · {quality} {formation_name(lib,match['primary_positions'])} · 实验预设 {t['preset_name']}"
+    suffix='双阶段精确匹配' if match['primary_exact']and match['secondary_exact']else'按同风格最接近阵型匹配'
     return f"{STYLE_NAMES.get(t['style_id'],t['preset_name'])} · 主偏好 {formation_name(lib,match['primary_positions'])} / 次偏好 {formation_name(lib,match['secondary_positions'])} · {suffix}"
 
 def _style_candidates(catalog,style,primary):
@@ -72,16 +75,22 @@ def _rank(candidates,shape,other,phase=0):
         return (a,b,t['index'])
     return min(candidates,key=key),key
 
-def variants(catalog,style,primary,secondary):
+def variants(catalog,style,primary,secondary,*,assistant_shape_only=False):
     """Up to two presets: the coach's primary and second preferred formation."""
-    candidates,formations=_style_candidates(catalog,style,primary)
+    if assistant_shape_only:
+        formations={r['code']:r['positions'] for r in catalog['formations']}
+        candidates=catalog['templates']
+        if primary not in formations or not candidates:
+            raise ValueError('助教首选阵型未能与原装预设匹配')
+    else:
+        candidates,formations=_style_candidates(catalog,style,primary)
     primary_positions=formations[primary];secondary_positions=formations.get(secondary)
     first,key=_rank(candidates,primary_positions,secondary_positions);score=key(first)
     match={'primary_code':primary,'secondary_code':secondary,
            'primary_positions':primary_positions,'secondary_positions':secondary_positions,
            'primary_exact':score[0]==0,'secondary_exact':secondary in formations and score[1]==0,
            'position_difference_counts':list(score[:2]),
-           'selection_policy':'same_style_then_primary_shape_then_secondary_shape_then_stable_index'}
+           'selection_policy':'registered_shapes_then_stable_index' if assistant_shape_only else 'same_style_then_primary_shape_then_secondary_shape_then_stable_index'}
     result=[{'index':1,'formation_code':primary,'exact':score[0]==0,
              'position_difference':score[0],'preset':first,'match':match}]
     if secondary_positions is None or secondary==primary:return result
@@ -96,7 +105,7 @@ def variants(catalog,style,primary,secondary):
     result.append({'index':2,'formation_code':secondary,'exact':difference==0,
                    'position_difference':difference,'preset':second,
                    'match':{**match,'variant':'secondary',
-                            'selection_policy':'same_style_then_secondary_shape_then_primary_phase'}})
+                            'selection_policy':'registered_shapes_then_stable_index' if assistant_shape_only else 'same_style_then_secondary_shape_then_primary_phase'}})
     return result
 
 def _selection(lib,index,clubs):
@@ -157,21 +166,25 @@ def ensure(lib,key,clubs=None,slot=None):
         data['selection_sha256']=selection_sha;lib.write(inputs,data)
     native=lib.native([],root,'coach_preset_staff_'+digest({'s':selection_sha,'e':stamp})[:12],{'FM27_STAFF_FRAGMENT_DIRECTORY':str(fragments)})
     coaches={r['selector']:r for r in native if r.get('event')=='staff_body_read'and r['accepted']and not r['error']}
-    people={s['person_selector']:s for s in data['staff']};expected={s['person_selector']:s for s in read(prepared/'staff_fragments.json')['rows']}
+    expected={s['person_selector']:s for s in read(prepared/'staff_fragments.json')['rows']}
     lib.write(folder/'progress.json',{'stage':'核对教练原版读回并匹配原装预设'})
     catalog=assets(lib,root);teams=[];failures=[]
     managed={m['club_uid']for m in index['managed']}
 
+    read_errors = {row['club_uid']: row['error'] for row in data.get('failures', []) if 'club_uid' in row}
+
     def build(club,staff_row,selector,team_id):
         try:
-            if staff_row is None or not isinstance(selector,int):raise ValueError('存档中未找到可确认的一线队主教练')
+            if staff_row is None or not isinstance(selector,int):
+                raise ValueError(read_errors.get(club['uid'], '存档中未找到可确认的一线队主教练'))
             if staff_row.get('club_uid')!=club['uid']:raise ValueError('主教练球队引用不完整')
             n=coaches.get(selector);e=expected.get(selector)
             if not n or not e or n['profile_hex']!=e['profile_hex']:raise ValueError('教练偏好未通过原版读回')
             raw=bytes.fromhex(n['native_d4_to_f4_hex'])
             if raw[11:19].hex()!=e['codes_hex']:raise ValueError('主次偏好阵型读回不符')
             style,primary,secondary=raw[20],raw[11],raw[12]
-            options=variants(catalog,style,primary,secondary)
+            shape_only=staff_row['coach_assignment']=='assistant_fallback' and style==255
+            options=variants(catalog,style,primary,secondary,assistant_shape_only=shape_only)
             rows=[{'index':option['index'],'preset_index':option['preset']['index'],
                    'preset_sha256':digest(option['preset']),'preset_name':option['preset']['name'],
                    'formation':formation_name(lib,[c['position']for c in option['preset']['phases'][0]]),
@@ -182,41 +195,36 @@ def ensure(lib,key,clubs=None,slot=None):
             teams.append({'team_id':team_id,'club_uid':club['uid'],'name':club.get('short_name')or club['name'],
                           'coach_uid':staff_row.get('unique_id'),
                           'coach_name':staff_row.get('name')or staff_row.get('full_name')or str(staff_row.get('unique_id')),
-                          'coach_selector':selector,'coach_assignment':'first_team_reference',
-                          'style_id':style,'style_code':preset['style_code'],'preset_index':preset['index'],
+                          'coach_selector':selector,'coach_assignment':staff_row['coach_assignment'],
+                          'style_id':None if shape_only else style,'style_code':preset['style_code'],'preset_index':preset['index'],
                           'preset_sha256':digest(preset),'preset_name':preset['name'],'formation_match':match,
                           'variants':rows,'roster_size':None})
         except (ValueError,KeyError,StopIteration)as error:
-            failures.append({'club_uid':club['uid'],'name':club.get('short_name')or club['name'],'error':str(error)})
+            reason = str(error)
+            if staff_row and staff_row.get('coach_assignment')=='assistant_fallback':
+                reason = '主教练空缺 · 一线队助教 '+staff_row['name']+' · '+reason
+            failures.append({'club_uid':club['uid'],'name':club.get('short_name')or club['name'],'error':reason})
 
-    if data.get('profile')==LEAGUE_PROFILE:
-        staff_by_club={}
-        for row in data.get('staff')or[]:
-            current=staff_by_club.get(row.get('club_uid'))
-            if current is None or (row.get('team_slot')==0 and current.get('team_slot')!=0):
-                staff_by_club[row['club_uid']]=row
-        for club in data['clubs']:
-            if club['uid']in managed:continue
-            staff_row=staff_by_club.get(club['uid'])
-            build(club,staff_row,staff_row.get('person_selector')if staff_row else None,
-                  staff_row.get('team_id')if staff_row else None)
-    else:
-        for t in table['records']:
-            club=next(c for c in data['clubs']if any(x['team_id']==t['team_id']for x in c['teams']))
-            if club['uid']in managed:continue
-            selector=t['coach_person_reference'];staff_row=people.get(selector)
-            if staff_row and staff_row['is_human_manager']:continue
-            build(club,staff_row,selector,t['team_id'])
+    staff_by_club = {r['club_uid']:r for r in data['staff']}
+    for club in data['clubs']:
+        if club['uid'] in managed:continue
+        person = staff_by_club.get(club['uid'])
+        team_id = next(t['team_id'] for t in club['teams'] if t['slot']==0)
+        build(club,person,person['person_selector'] if person else None,team_id)
     value={'binding':stamp,'selection_sha256':selection_sha,'teams':teams,'failures':failures,
            'source_date':data['date'],'preset_assets_binding':catalog['binding']}
     lib.write(cache,value);return value
 
-def opponents(lib,key,own):
-    value=ensure(lib,key)
+def preference_label(coach):
+    if coach.get('coach_assignment')!='assistant_fallback':return '教练偏好预设'
+    return '主教练空缺 · 助教阵型备用方案' if coach['style_id'] is None else '主教练空缺 · 助教偏好备用方案'
+
+def opponents(lib,key,own,value=None):
+    if value is None:value=ensure(lib,key)
     return [{'key':'coach:'+str(t['team_id']),'fixture_key':'coach:'+str(t['team_id']),'club_uid':t['club_uid'],
-             'name':t['name'],'side':1,'available':True,'source_kind':'coach_preference_preset',
+             'name':t['name'],'side':1,'available':True,'source_kind':'assistant_preference_preset' if t['coach_assignment']=='assistant_fallback' else 'coach_preference_preset',
              'date':value['source_date'],'member':'original_installation_preset:'+str(t['preset_index']),
-             'source':'教练偏好预设 · '+t['coach_name']+' · '+describe(lib,t)+'；非当天实战还原。',
+             'source':preference_label(t)+' · '+t['coach_name']+' · '+describe(lib,t)+'；非当天实战还原。',
              'cache_roster_count':0,'match_roster_count':0,'roster_pending':True,'excluded_substitute_uids':[],
              'coach':t,'preset_reference_proven':False}
             for t in value['teams']if t['club_uid']!=own]
@@ -250,7 +258,7 @@ def preset_by_index_team(lib,key,preset_index,club_name,expected_sha256=None):
 
 def team(lib,key,candidate):
     preset,t=_preset(lib,key,candidate)
-    result=_preset_team(lib,preset,t['name'],'教练偏好预设 · '+preset['name'])
+    result=_preset_team(lib,preset,t['name'],preference_label(t)+' · '+preset['name'])
     desktop_static_plans.roster(lib,key,t['club_uid'],result)
     return result
 

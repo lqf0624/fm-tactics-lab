@@ -5,6 +5,7 @@ def header(profile, *, digest_ranges=False):
     lines = ['#pragma once', 'static const char* compat_profile_id=' + json.dumps(profile['id']) + ';']
     if digest_ranges:
         lines.append('#define FM27_COMPAT_DIGEST_RANGES')
+        lines.append('static const char* epic_reference_sha256=' + json.dumps(profile['reference_sha256']) + ';')
         lines.append('struct CompatRange {unsigned rva,size;const char* sha256;};')
         ranges = ['{' + str(r['rva']) + ',' + str(r['size']) + ',' + json.dumps(r['sha256']) + '}'
                   for r in profile['ranges']]

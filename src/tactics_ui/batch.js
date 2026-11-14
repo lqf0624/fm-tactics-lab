@@ -9,6 +9,21 @@ resultsView=function(){
 bind=function(){
  batchBind();
  if($('#batch-resume'))$('#batch-resume').onclick=async()=>{try{const response=await api('/api/resume',{id:selectedJob.id,workers:Number($('#workers').value)});activeJob=response.id;await poll()}catch(e){toast(e.message)}};
+ $$('[data-retest]').forEach(button=>{
+  button.disabled=!!activeJob;
+  button.onclick=async()=>{
+   const job=selectedJob,run=job.runs[Number(button.dataset.retest)],fixture=job.schedule[run.variant];
+   const input=prompt(fixture.opponent+' · '+(fixture.venue==='H'?'主场':'客场')+' · 复测场数（1–100）','10');
+   if(input===null)return;
+   const count=Number(input);
+   if(!Number.isInteger(count)||count<1||count>100)return toast('请输入有效的复测场数');
+   button.disabled=true;
+   try{
+    const result=await api('/api/jobs/retest',{id:job.id,variant:run.variant,count,workers:Number($('#workers').value)});
+    activeJob=result.id;polledJob=null;selectedJob=null;await poll();
+   }catch(e){button.disabled=false;showActionError('复测失败',e.message);}
+  };
+ });
  if($('#batch-csv'))$('#batch-csv').onclick=()=>{
   const header=['模式','方案','种子','主队进球','客队进球','耗时秒','尝试次数','日志'],rows=selectedJob.runs.map(r=>[selectedJob.event_details===false?'快速（仅比分/统计）':'完整',variantLabel(r.variant),r.seed,...r.result.score,r.elapsed_seconds??'',r.attempts??1,r.log]);
   const csv='\ufeff'+[header,...rows].map(row=>row.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n');
@@ -32,7 +47,7 @@ quickModeLabel.innerHTML='<input id="quick-score-mode" type="checkbox">快速模
 $('#run').before(quickModeLabel);
 const apiBeforeQuickMode=api;
 api=async function(url,data){
- if(url==='/api/run'&&data)data={...data,event_details:!$('#quick-score-mode').checked};
+ if((url==='/api/run'||url==='/api/save/run')&&data)data={...data,event_details:!$('#quick-score-mode').checked};
  return apiBeforeQuickMode(url,data);
 };
 window.addEventListener('DOMContentLoaded',()=>{

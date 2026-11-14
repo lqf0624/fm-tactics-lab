@@ -8,10 +8,13 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 TOP = {'README.md', 'README.en.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CONTRIBUTING.md',
-       'CHANGELOG.md', 'requirements.txt', '.gitignore', '.gitattributes', 'Launcher.cs'}
+       'CHANGELOG.md', 'AGENTS.md', 'PRD.md', 'PROJECT_INDEX.md', 'requirements.txt', '.gitignore', '.gitattributes', 'Launcher.cs'}
 TYPES = {'src': {'.py', '.js', '.css', '.html'},
          'scripts': {'.py'}, 'tests': {'.py', '.cjs'}, 'docs': {'.md'},
-         'native': {'.cpp', '.h', '.manifest'}}
+         'native': {'.cpp', '.h', '.manifest'}, 'tauri/src': {'.rs'}}
+TAURI_FILES = {'tauri/.gitignore', 'tauri/Cargo.lock', 'tauri/Cargo.toml',
+               'tauri/build.rs', 'tauri/tauri.conf.json'}
+ICONS = {'assets/app-icon.ico', 'assets/app-icon.png'}
 NATIVE_JSON = {'native/profile_metadata.json', 'native/adapter_version.json',
                'native/epic_profile_metadata.json', 'native/epic_adapter_version.json'}
 SCREENSHOTS = {'docs/screenshots/tactics.png', 'docs/screenshots/players.png',
@@ -25,6 +28,7 @@ def source_files(root=ROOT):
     result = [root / name for name in TOP]
     result.extend(root / name for name in NATIVE_JSON)
     result.extend(root / name for name in SCREENSHOTS)
+    result.extend(root / name for name in TAURI_FILES | ICONS if (root / name).is_file())
     for directory, suffixes in TYPES.items():
         result.extend(path for path in (root / directory).rglob('*')
                       if path.is_file() and path.suffix in suffixes
@@ -40,9 +44,11 @@ def validate(root=ROOT):
             raise ValueError('Missing or symlinked public source: ' + str(path))
         if not path.resolve().is_relative_to(root.resolve()):
             raise ValueError('Source escapes release directory: ' + str(path))
-        if path.relative_to(root).as_posix() in SCREENSHOTS:
-            if not path.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'):
-                raise ValueError('Expected PNG screenshot: ' + str(path))
+        name = path.relative_to(root).as_posix()
+        if name in SCREENSHOTS | ICONS:
+            signature = b'\x00\x00\x01\x00' if path.suffix == '.ico' else b'\x89PNG\r\n\x1a\n'
+            if not path.read_bytes().startswith(signature):
+                raise ValueError('Unexpected image format: ' + name)
             continue
         text = path.read_text(encoding='utf-8-sig')
         # Public sources must not contain workstation paths or game code dumps.
@@ -77,5 +83,5 @@ def export(output, root=ROOT):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v1113.1-source.zip')
+    parser.add_argument('--output', type=Path, default=ROOT / 'dist/fm-tactics-lab-v1114.6-source.zip')
     export(parser.parse_args().output)

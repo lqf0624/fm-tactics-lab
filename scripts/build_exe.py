@@ -1,8 +1,10 @@
-"""Build a private Windows executable using an explicit Python 3.12 installation."""
+"""Build a unified Tauri executable using native adapters and CPython 3.12."""
 import argparse
 import hashlib
 from importlib.metadata import distribution
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import zipfile
@@ -16,14 +18,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--python-home', required=True, type=Path,
                         help='Full CPython 3.12 x64 distribution containing Lib and DLLs')
-    parser.add_argument('--icon', type=Path, help='Optional local application ICO file')
-    parser.add_argument('--csc', type=Path,
-                        default=Path('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe'))
-    parser.add_argument('--platform', choices=('steam', 'epic'), default='steam')
+    parser.add_argument('--offline', action='store_true', help='Use cached Cargo dependencies')
     args = parser.parse_args()
-    check_inputs(args.platform)
-    _, engine = adapter_paths(args.platform)
-    epic = args.platform == 'epic'
+    engines = {}
+    for platform in ('steam', 'epic'):
+        check_inputs(platform)
+        _, engines[platform] = adapter_paths(platform)
     python = args.python_home.resolve()
     for name in ['python.exe', 'python312.dll', 'python3.dll', 'vcruntime140.dll',
                  'vcruntime140_1.dll', 'LICENSE.txt', 'Lib', 'DLLs']:
@@ -65,20 +65,25 @@ def main():
         archive.write(library, 'python/python312.zip')
         for name in ASSETS:
             archive.write(ROOT / 'private/engine' / name, 'engine/' + name)
-        for name in ('fm27_native/FM27Simulator.exe', 'fm27_native/engine_compat_profile.json',
-                     'fm27_native/adapter_version.json'):
-            archive.write(engine / name, 'engine/' + name)
-    version = 'v1113.1-epic-test' if epic else 'v1113.1'
+        for platform, engine in engines.items():
+            target = 'engine/fm27_native' if platform == 'steam' else 'engine/fm27_native/epic'
+            for name in ('FM27Simulator.exe', 'engine_compat_profile.json', 'adapter_version.json'):
+                archive.write(engine / 'fm27_native' / name, f'{target}/{name}')
+    target = Path(os.environ.get('CARGO_TARGET_DIR', build / 'tauri-target')).resolve()
+    toolchain_target = 'x86_64-pc-windows-msvc'
+    command = ['cargo', 'build', '--release', '--locked', '--target', toolchain_target, '--target-dir', str(target)]
+    if args.offline:
+        command.append('--offline')
+    subprocess.run(command, cwd=ROOT / 'tauri', check=True)
+    version = 'v1114.6'
     exe = dist / f'FM27-Tactics-Lab-{version}.exe'
-    subprocess.run([str(args.csc), '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/utf8output',
-                    *(['/define:EPIC_BUILD'] if epic else []),
-                    *(['/win32icon:' + str(args.icon.resolve())] if args.icon else []),
-                    '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
-                    '/reference:System.IO.Compression.dll', '/reference:System.IO.Compression.FileSystem.dll',
-                    '/resource:' + str(payload) + ',DesktopPayload', '/out:' + str(exe), str(ROOT / 'Launcher.cs')], check=True)
-    manifest = {'version': version, 'file': exe.name, 'payload_sha256': hashlib.sha256(payload.read_bytes()).hexdigest(), 'native_host_sha256': hashlib.sha256((engine / 'fm27_native/FM27Simulator.exe').read_bytes()).hexdigest(), 'sha256': hashlib.sha256(exe.read_bytes()).hexdigest(),
-                'private_assets_included': True, 'public_source_release': False}
-    (dist / ('private-build-epic.json' if epic else 'private-build.json')).write_text(json.dumps(manifest, indent=2), encoding='utf8')
+    shutil.copyfile(target / toolchain_target / 'release/fm27-tactics-lab.exe', exe)
+    adapters = {platform: hashlib.sha256((engine / 'fm27_native/FM27Simulator.exe').read_bytes()).hexdigest()
+                for platform, engine in engines.items()}
+    manifest = {'version': version, 'file': exe.name, 'bytes': exe.stat().st_size, 'transport': 'stdio',
+                'payload_sha256': hashlib.sha256(payload.read_bytes()).hexdigest(),
+                'native_adapters': adapters, 'sha256': hashlib.sha256(exe.read_bytes()).hexdigest()}
+    (dist / 'private-build.json').write_text(json.dumps(manifest, indent=2), encoding='utf8')
     print(json.dumps(manifest, indent=2))
 
 

@@ -22,6 +22,7 @@ import desktop_opponent_scope
 import desktop_recovery_sources
 import desktop_ai_state
 import desktop_generation_catalog
+import desktop_league_testing
 import desktop_static_plans
 import desktop_observed_plans
 import desktop_real_generation
@@ -132,7 +133,8 @@ class SaveLibrary:
             cached=self.reusable_source(digest)
             if cached:
                 self.write(cached/'selected_source.json',{'path':str(source)})
-                desktop_recovery_sources.remember(self,source=source,imported=cached/'dataset.json')
+                if self.index_data(cached).get('save_mode') != 'online_draft':
+                    desktop_recovery_sources.remember(self,source=source,imported=cached/'dataset.json')
                 self.write(self.root/'latest.json',{'id':cached.name})
                 return {'id':cached.name,'reused':True}
             require_space(self.root, additional_bytes=2*GIB, reserve_bytes=SAVE_RESERVE_BYTES)
@@ -189,7 +191,8 @@ class SaveLibrary:
             # The index lists all retained cache candidates, not guessed club ownership.
             self.write(folder/'progress.json', {'status':'complete','stage':'读取完成，可选择球队与方案','id':key})
             self.write(self.root/'latest.json', {'id':key})
-            desktop_recovery_sources.remember(self,source=source,imported=folder/'dataset.json')
+            if self.index_data(folder).get('save_mode') != 'online_draft':
+                desktop_recovery_sources.remember(self,source=source,imported=folder/'dataset.json')
         except Exception as error:
             self.write(folder/'progress.json', {'status':'error','stage':str(error),'id':key})
         finally:
@@ -210,9 +213,11 @@ class SaveLibrary:
         if 'first_team_counts' not in data:raise ValueError('此缓存尚未区分一线队，请重新导入存档')
         counts = {int(k):v for k,v in data['first_team_counts'].items() if k!='None'}
         value.update(date=data['date'],build=data['build'],source=data['source'],source_sha256=data['source_sha256'],
+                     save_mode=data.get('save_mode','career'),
                      managed=data['managed'],warnings=data['warnings'],cache_count=len(data['caches']),
                      clubs=[{'uid':c['uid'],'name':c.get('name') or c.get('short_name') or str(c['uid']),
                              'players':counts.get(c['uid'],0)} for c in data['clubs'] if counts.get(c['uid'],0)>=11 and c['uid'] in {m['club_uid']for m in data['managed']}])
+        value.update(desktop_league_testing.catalog(self,key))
         if (folder/'selected_source.json').exists():value['source']=read(folder/'selected_source.json')['path']
         return value
 
@@ -248,13 +253,15 @@ class SaveLibrary:
         folder=self.folder(key)
         data = dataset(folder/'dataset.json')
         club = int(club)
+        if club not in {c['uid'] for c in desktop_league_testing.catalog(self,key)['clubs']}:
+            raise ValueError('请选择当前存档五大联赛或执教球队')
         self.ensure_rosters(folder,[club])
         players = [p for p in read(folder/'rosters'/f'{club}.json') if p.get('unique_id')is not None]
         if len(players)<11:
             raise ValueError('该队不足11名已解析球员')
         return {'players':[{'uid':p['unique_id'],'name':p['name'],'positions':p['positions'],'ca':p['ability']['current']} for p in players],
                 'tactics':[{'index':i,'name':t['name'],'team_id':t['team_id'],'available':bool(t.get('raw_plan'))}
-                           for i,t in enumerate(data['tactics']) if t.get('club_uid')==club and t.get('team_slot')==0],
+                           for i,t in enumerate(data['tactics']) if t.get('club_uid')==club and t.get('team_slot')==0]+[{'index':'board','name':'沿用当前战术 · 读取真实阵容','available':True}],
                 'selections':[s for s in data['selections'] if s.get('club_uid')==club and s.get('team_slot')==0],
                 'source_date':data['date']}
 
@@ -281,7 +288,10 @@ class SaveLibrary:
 
     def _name_maps(self,folder,data,competition_ids,nation_ids):
         language='zh' if str(desktop_locale.system_language().get('language','')).lower().startswith('zh') else 'en'
-        stamp=(self.app.desktop_engine.sha(folder/'native_binding.json'),language,
+        # The language database supplies these labels even before a simulator has been run.
+        root = os.environ.get('FM27_GAME_ROOT')
+        lang_path = desktop_game_db_names._lang_db_path(root)
+        stamp=(str(lang_path),lang_path.stat().st_mtime_ns if lang_path else 0,language,
                tuple(sorted(competition_ids)),tuple(sorted(nation_ids)))
         cached=self._names.get(stamp)
         if cached is not None:return cached
@@ -408,9 +418,10 @@ class SaveLibrary:
                     'available':False,'variants':[],'error':failures.get(row['club_uid'],'该队主教练偏好尚不可用')})
             else:
                 variants=copy.deepcopy(coach['variants'])
+                label=('助教 '+coach['coach_name']) if coach.get('coach_assignment')=='assistant_fallback' else coach['coach_name']
                 for variant in variants:
-                    variant['name']=desktop_save_export.tactic_file_name(coach['name'],coach['coach_name'],variant['index'])
-                teams.append({'club_uid':row['club_uid'],'name':coach['name'],'coach_name':coach['coach_name'],
+                    variant['name']=desktop_save_export.tactic_file_name(coach['name'],label,variant['index'])
+                teams.append({'club_uid':row['club_uid'],'name':coach['name'],'coach_name':label,'coach_assignment':coach.get('coach_assignment'),'preference_label':desktop_coach_presets.preference_label(coach),
                     'available':True,'variants':variants,'error':None})
         report={'profile':self.LEAGUE_PROFILE,'binding':desktop_coach_presets.binding(self,folder),
                 'league':{'key':entry['key'],'competition_id':entry.get('competition_id'),
@@ -656,7 +667,7 @@ class SaveLibrary:
         return self._merge_real_library(key,league,own,library,records,failures,elapsed,prepared.get('binding'))
 
     def preset_plan(self,key,preset_index,preset_sha256):
-        host=self.app.desktop_engine.sha(self.app.NATIVE/'FM27Simulator.exe')
+        host=self.app.desktop_engine.sha(self.app.native_host())
         base=self.root.parent/'preset_plans';base.mkdir(parents=True,exist_ok=True)
         stamp=hashlib.sha256(json.dumps({'host':host,'preset':preset_sha256,'revision':1}).encode()).hexdigest()[:24]
         path=base/(stamp+'.tac')
@@ -867,7 +878,7 @@ class SaveLibrary:
         env.update(extra or {})
         log = folder/(name+'.jsonl')
         if log.exists():log=folder/(name+'_'+secrets.token_hex(4)+'.jsonl')
-        result = subprocess.run([str(self.app.NATIVE/'FM27Simulator.exe'),*args,'--output',str(log)],
+        result = subprocess.run([str(self.app.native_host()),*args,'--output',str(log)],
             cwd=self.app.ROOT,env=env,capture_output=True,timeout=90,creationflags=subprocess.CREATE_NO_WINDOW)
         rows=[]
         if log.exists():
@@ -878,11 +889,16 @@ class SaveLibrary:
         discovered=(discover_tactic_boundary and result.returncode==173 and parsed.get('accepted') and
                     not parsed.get('stream_error') and 0<parsed.get('consumed',0)<parsed.get('size',0))
         if result.returncode and not discovered:
+            if not log.is_file():
+                log.with_suffix('.host.log').write_bytes(result.stdout + result.stderr)
+                if result.returncode in (83, 84, 102):
+                    raise ValueError(f'原版读取器启动失败（退出码 {result.returncode}），记录：{log.with_suffix(".host.log").name}')
+                log=log.with_suffix('.host.log')
             raise ValueError(f'原版读取器未接受此输入（退出码 {result.returncode}），记录：{log.name}')
         return rows
 
     def check_binding(self, folder):
-        binding={'host_sha256':self.app.desktop_engine.sha(self.app.NATIVE/'FM27Simulator.exe'),
+        binding={'host_sha256':self.app.desktop_engine.sha(self.app.native_host()),
                  'resource_fingerprint':self.app.ENGINE_COMPATIBILITY.get('resource_fingerprint')}
         path=folder/'native_binding.json'
         if path.exists() and read(path)!=binding:
@@ -1033,7 +1049,91 @@ class SaveLibrary:
             profile[k+'_reputation']=p['reputation'][k]
         return values,profile
 
+    def board_clubs(self, key, managed=None):
+        status = self.status(key)
+        if status['status'] != 'complete' or not status.get('clubs'):
+            return {'clubs': [], 'status': status['status']}
+        own = status['clubs'][0]['uid'] if managed is None else int(managed)
+        if own not in {c['uid'] for c in status['clubs']}:
+            raise ValueError('请选择当前存档的执教球队')
+        data = dataset(self.folder(status['id'])/'dataset.json')
+        league = desktop_opponent_scope.identify(data, own)['same_league']
+        allowed = league | {c['uid'] for c in status['clubs']}
+        clubs = [{'uid': c['uid'], 'name': c.get('short_name') or c['name']}
+                 for c in data['clubs'] if c['uid'] in allowed]
+        listed = {c['uid'] for c in clubs}
+        clubs.extend({'uid':int(uid),'name':c.get('short_name') or c['name']}
+                     for uid,c in sorted(data.get('league_clubs',{}).items(),key=lambda item:item[1]['name'])
+                     if int(uid) not in listed and c.get('first_team_id') is not None)
+        _,_,competition_ids,maps = self._league_maps(self.folder(status['id']),data)
+        memberships = collections.defaultdict(list)
+        for entry in data.get('leagues',[]):
+            season=entry.get('season')
+            if type(season) is not int:
+                continue
+            label=maps['competitions'].get(competition_ids.get(str(entry['competition_id'])))
+            if label:
+                for uid in entry['club_uids']:
+                    memberships[uid].append((season,label))
+        for c in clubs:
+            c['same_league']=c['uid']==own or c['uid'] in league
+            rows=memberships[c['uid']]
+            if rows:
+                season=max(year for year,_ in rows)
+                names={name for year,name in rows if year==season}
+                if len(names)==1:
+                    c['league_name']=names.pop()
+                    c['season']=season
+        fixtures = sorted((f for f in data['fixtures'] if not f.get('played')
+                           and (f.get('date') or '') >= data['date']
+                           and f.get('home_team_slot') == f.get('away_team_slot') == 0
+                           and own in (f.get('home_club_uid'), f.get('away_club_uid'))
+                           and {f['home_club_uid'], f['away_club_uid']} <= (league | {own})),
+                          key=lambda f: (f['date'], f.get('kick_off_time') or ''))
+        opponent = None
+        if fixtures:
+            first = fixtures[0]
+            opponent = first['away_club_uid'] if first['home_club_uid'] == own else first['home_club_uid']
+        return {'id': status['id'], 'date': data['date'], 'clubs': clubs, 'own': own, 'opponent': opponent}
+
+    def board_roster(self, key, club, side, scenario):
+        folder = self.folder(key)
+        data = dataset(folder/'dataset.json')
+        info = next((c for c in data['clubs'] if c['uid'] == club), None)
+        if info is None:
+            info = data.get('league_clubs',{}).get(str(club))
+        if info is None:
+            raise ValueError('存档中找不到球队')
+        side = self.app.integer(side, 0, 1, '球队')
+        team = self.app.validate_scenario(scenario)['teams'][side]
+        selection = sorted((p for p in data['selections'] if p.get('club_uid') == club
+                            and p.get('team_slot') == 0), key=lambda p: p['slot'])
+        starters = [p.get('source_uid') for p in selection if not p['substitute']]
+        reserves = [p.get('source_uid') for p in selection if p['substitute']]
+        team.pop('squad', None)
+        desktop_static_plans.roster(self, key, club, team, starters if len(starters) == 11 else [])
+        if len(starters) == 11:
+            people = {p['unique_id']: p for p in read(folder/'rosters'/f'{club}.json')}
+            chosen = [p['source_uid'] for p in team['players'][:11]]
+            for uid in reserves:
+                if uid in people and uid not in chosen and len(chosen) < min(23,len(team['players'])):
+                    person = people[uid]
+                    attributes, profile = self.player_values(person)
+                    team['players'][len(chosen)].update(name=person['name'], source_uid=uid,
+                                                       attributes=attributes, native_profile=profile)
+                    chosen.append(uid)
+            team['roster_size'] = len(chosen)
+            for player in team['players'][len(chosen):]:
+                player.pop('source_uid', None)
+                player['name'] = '未入比赛名单'
+        team['name'] = info.get('short_name') or info['name']
+        desktop_static_plans.bind_source(team,key,club)
+        team['setpieces']['role_priorities'] = {k: [] for k in team['setpieces']['role_priorities']}
+        scenario['teams'][side] = team
+        return self.app.validate_scenario(scenario)['teams'][side]
+
     def load_team(self, key, club, index, selected, side, scenario, substitutes=None):
+        if index=='board':return desktop_league_testing.load_board(self,key,int(club),scenario,side,selected,substitutes)
         folder=self.folder(key);data=dataset(folder/'dataset.json')
         app=self.app
         scenario=app.validate_scenario(scenario)
@@ -1047,7 +1147,13 @@ class SaveLibrary:
             starts=sorted((s for s in data['selections'] if s.get('club_uid')==club and s.get('team_slot')==0 and not s['substitute']),key=lambda s:s['slot'])
             automatic=copy.deepcopy(scenario['teams'][side])
             self.apply_plan(automatic,self.parsed_plan(key,index))
-            desktop_static_plans.roster(self,key,club,automatic,[s.get('source_uid') for s in starts])
+            preferred = [s.get('source_uid') for s in starts]
+            if data.get('save_mode') == 'online_draft':
+                picks = [s for s in data['selections'] if s['club_uid'] == club]
+                by_slot = {s['slot']: s['source_uid'] for s in picks if not s['substitute']}
+                bench = sorted((s for s in picks if s['substitute']), key=lambda s: s['slot'])
+                preferred = [by_slot.get(i) for i in range(11)] + [s['source_uid'] for s in bench]
+            desktop_static_plans.roster(self,key,club,automatic,preferred)
             selected=[p['source_uid'] for p in automatic['players'][:11]]
             if substitutes is None:substitutes=[p['source_uid'] for p in automatic['players'][11:automatic['roster_size']]]
         if len(selected)!=11 or len(set(selected))!=11 or any(u not in people for u in selected):
@@ -1074,6 +1180,7 @@ class SaveLibrary:
         team.update(captains=[],takers={k:[] for k in app.TAKER_KEYS},tactic_name=tactic['name'])
         c=next(c for c in data['clubs'] if c['uid']==club)
         team['name']=c.get('short_name') or c['name']
+        desktop_static_plans.bind_source(team,key,club)
         result=self.select_squad(scenario,side,selected,substitutes or [],initial=True)
         setpiece_notice=f'已载入 {setpiece_count} 套存档定位球套路。' if setpiece_count else '定位球套路沿用战术板设置。'
         return {'scenario':result,'source':{'save_id':key,'club_uid':club,'date':data['date'],
@@ -1108,7 +1215,7 @@ class SaveLibrary:
         team['setpieces']['role_priorities']={k:[remap[i]for i in values if i in remap]for k,values in team['setpieces']['role_priorities'].items()}
         return app.validate_scenario(scenario)
 
-    OPPONENT_PROFILE='coach-preference-presets-v20'
+    OPPONENT_PROFILE='coach-preference-five-leagues-v25'
 
     def opponent_report(self, path):
         if not path.exists():return None
@@ -1116,14 +1223,41 @@ class SaveLibrary:
         if value.get('recovery_profile')!=self.OPPONENT_PROFILE:return None
         return value if value.get('binding')==desktop_coach_presets.binding(self,path.parent) else None
 
+    def draft_opponents(self, data, own):
+        if not any(club['uid'] == own for club in data['clubs']):
+            raise ValueError('所选球队不属于在线选秀存档')
+        rows = []
+        for index, tactic in enumerate(data['tactics']):
+            club = tactic['club_uid']
+            if club == own or not tactic.get('raw_plan'):
+                continue
+            key = f'draft:{index}'
+            rows.append({'key': key, 'fixture_key': key, 'club_uid': club,
+                         'name': tactic['club_name'], 'side': 1, 'available': True,
+                         'source_kind': 'saved_template', 'same_league': True,
+                         'date': data['date'], 'member': tactic['name'],
+                         'source': '在线选秀存档 · ' + tactic['name'],
+                         'roster_pending': False, 'cache_roster_count': 0,
+                         'match_roster_count': min(23, data['first_team_counts'][str(club)]),
+                         'excluded_substitute_uids': []})
+        return {'opponents': rows, 'failures': [], 'unrecovered_clubs': [], 'save_mode': 'online_draft',
+                'same_league_available': len({row['club_uid'] for row in rows}),
+                'same_league_clubs': len(data['clubs']) - 1}
+
     def inspect_opponents(self, key, club):
         folder=self.folder(key);self.check_binding(folder);club=int(club)
+        data = self.index_data(folder)
+        if data.get('save_mode') == 'online_draft':
+            return self.draft_opponents(data, club)
         retained=self.opponent_report(folder/f'opponents_{club}.json')
-        return retained if retained is not None else desktop_coach_presets.report(self,key,club)
+        return retained if retained is not None else desktop_league_testing.opponents(self,key,club)
 
     def begin_opponents(self, key, club):
         folder=self.folder(key);club=int(club)
         self.check_binding(folder)
+        data = self.index_data(folder)
+        if data.get('save_mode') == 'online_draft':
+            return {'status': 'complete', **self.draft_opponents(data, club)}
         path=folder/f'opponents_{club}.json'
         progress=folder/f'opponent_progress_{club}.json'
         retained=self.opponent_report(path)
@@ -1153,6 +1287,19 @@ class SaveLibrary:
         return {'status':'reading','stage':'正在读取教练偏好并匹配原装预设，不模拟比赛'}
 
     def opponent_team(self, key, candidate, side, own_team):
+        if str(candidate).startswith('draft:'):
+            data = self.index_data(self.folder(key))
+            if data.get('save_mode') != 'online_draft' or not re.fullmatch(r'draft:\d{1,5}', candidate):
+                raise ValueError('无效的在线选秀对手方案')
+            index = int(candidate.split(':')[1])
+            if index >= len(data['tactics']) or not data['tactics'][index].get('raw_plan'):
+                raise ValueError('在线选秀对手方案不可用')
+            tactic = data['tactics'][index]
+            scenario = copy.deepcopy(self.app.DEFAULT)
+            result = self.load_team(key, tactic['club_uid'], index, None, 1, scenario)
+            return result['scenario']['teams'][1]
+        if str(candidate).startswith(('league-coach:','saved-club:')):
+            return desktop_league_testing.opponent_team(self,key,candidate)
         if str(candidate).startswith('coach:'):
             return desktop_coach_presets.team(self,key,candidate)
         if str(candidate).startswith('observed:'):

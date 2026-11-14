@@ -3,20 +3,15 @@ import hashlib,json,struct,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).with_name('vendor')))
 
-PROFILE = 'static-first-team-coaches-v3'
-LEAGUE_PROFILE = 'static-league-coaches-v3'
+PROFILE = 'static-first-team-coaches-v6'
+LEAGUE_PROFILE = 'static-league-coaches-v5'
 FRAGMENT_DIRECTORY = 'first_team_staff_fragments'
-DIRECTORY_FILE = 'coach_directory.json'
 MANAGER_JOB = 16
+EMPTY_REFERENCES = (0, 0xffffffff)
 
 
 def _read(path):
     return json.loads(Path(path).read_text(encoding='utf8'))
-
-
-def _club_row(value, name):
-    getter = value.get if isinstance(value, dict) else lambda key: getattr(value, key, None)
-    return getter(name)
 
 
 def _registry(index, wanted):
@@ -39,161 +34,67 @@ def _registry(index, wanted):
     return rows
 
 
-def _scan_managers(source, index):
-    """Every first-team manager's preference bytes, read once through fmsave."""
-    import desktop_save_compat
-    desktop_save_compat.install()
-    import fmsave
-    import fmsave.readers.staff as reader
-    from desktop_save_worker import plain
-    wanted = {int(value) for value in (index.get('league_clubs') or {})}
-    people = {m.get('club_uid') for m in index.get('managed') or []}
-    profiles = {}
-    selectors = {}
-    by_uid = {}
-    original_read = reader._read_ability_block
-    original_person = reader._PersonObject
-
-    def capture(db, header, layout):
-        result = original_read(db, header, layout)
-        if result[0] is not None and result[1] and result[3]:
-            base = header + layout.ability_base_offset + layout.entry_bytes * db[header + layout.entry_count_offset]
-            start = base + layout.preferences_offset
-            end = base + layout.block_40_offset + layout.block_40_count
-            if end - start == 52:
-                profiles[header] = {
-                    'profile_hex': bytes(db[start:end]).hex(),
-                    'codes_hex': bytes(db[base + layout.codes_offset:
-                                         base + layout.codes_offset + layout.code_count]).hex(),
-                    'ability_and_reputation_words': list(struct.unpack_from('<5H', db, base - 6)),
-                    'fragment_start': header + 13,
-                    'fragment_end': end + 4096,
-                }
-        return result
-
-    def person(*args, **kwargs):
-        obj = original_person(*args, **kwargs)
-        selectors[obj.uid] = struct.unpack_from('<I', db, obj.header)[0] + 1
-        if obj.header in profiles:
-            by_uid[obj.uid] = profiles[obj.header]
-        return obj
-
-    reader._read_ability_block = capture
-    reader._PersonObject = person
+def _contract_staff(save, reader, db):
+    """Recover save-local selectors for contracts decoded by the staff reader."""
+    headers = {}
+    original = reader._PersonObject
+    def capture(*args, **kwargs):
+        person = original(*args, **kwargs)
+        headers[person.uid] = (struct.unpack_from('<I', db, person.header)[0] + 1, person.unique_id)
+        return person
+    reader._PersonObject = capture
     try:
-        with fmsave.open(source) as save:
-            with save._context.section('game_db') as db:
-                staff = [s for s in save.staff()]
-                by_club = {}
-                for row in staff:
-                    club_uid = _club_row(row, 'club_uid')
-                    if club_uid not in wanted or club_uid in people:
-                        continue
-                    job = _club_row(row, 'job')
-                    if job is None or not hasattr(job, 'raw') or job.raw != MANAGER_JOB:
-                        continue
-                    if not _club_row(row, 'has_contract') or _club_row(row, 'is_human_manager'):
-                        continue
-                    team_slot = _club_row(row, 'team_slot')
-                    if isinstance(team_slot, int) and team_slot != 0:
-                        continue
-                    uid = _club_row(row, 'uid')
-                    info = by_uid.get(uid)
-                    selector = selectors.get(uid)
-                    if info is None or selector is None:
-                        continue
-                    manager = {'club_uid': club_uid, 'person_selector': selector, 'uid': uid,
-                               'unique_id': _club_row(row, 'unique_id'), 'name': _club_row(row, 'name'),
-                               'team_id': _club_row(row, 'team_id'),
-                               'team_slot': _club_row(row, 'team_slot'), **info}
-                    rank = lambda value: (0 if value.get('team_slot') == 0 else 1, value['uid'])
-                    current = by_club.get(club_uid)
-                    if current is None or rank(manager) < rank(current):
-                        by_club[club_uid] = manager
-                for manager in by_club.values():
-                    manager['fragment'] = bytes(db[manager.pop('fragment_start'):
-                                                   manager.pop('fragment_end')]).hex()
+        staff = list(save.staff())
     finally:
-        reader._read_ability_block = original_read
-        reader._PersonObject = original_person
-    return by_club
+        reader._PersonObject = original
+    return staff, headers
 
 
-def _prepare_league(source, folder, index_path, selection_path):
-    started = time.monotonic()
-    source = Path(source)
-    folder = Path(folder)
-    index_path = Path(index_path)
-    index = _read(index_path)
-    selection = _read(selection_path)
-    from desktop_storage import bounded_output
-    bounded_output(folder)
-    folder.mkdir(parents=True, exist_ok=True)
-    root = index_path.parent
-
-    def progress(text):
-        (folder / 'progress.json').write_text(json.dumps({'stage': text}, ensure_ascii=False), encoding='utf8')
-
-    progress('核对当前存档，准备读取所选联赛教练')
-    before = source.stat()
-    with source.open('rb') as stream:
-        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-    if digest != index['source_sha256']:
-        raise ValueError('存档已更新，请重新读取存档')
-    clubs = _registry(index, [row['uid'] for row in selection['clubs']])
-    cache = root / DIRECTORY_FILE
-    managers = None
-    if cache.exists():
-        try:
-            value = _read(cache)
-        except (OSError, ValueError):
-            value = None
-        if (isinstance(value, dict) and value.get('profile') == LEAGUE_PROFILE
-                and value.get('source_sha256') == digest):
-            managers = {int(key): row for key, row in value['managers'].items()}
-    if managers is None:
-        progress('读取一线队主教练偏好')
-        managers = _scan_managers(source, index)
-        cache.write_text(json.dumps({'profile': LEAGUE_PROFILE, 'source_sha256': digest,
-            'managers': {str(key): row for key, row in managers.items()}}, ensure_ascii=False), encoding='utf8')
-    after = source.stat()
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-        raise ValueError('读取期间存档发生变化')
-    fragments = folder / FRAGMENT_DIRECTORY
-    fragments.mkdir(exist_ok=True)
-    staff = []
-    rows = []
-    progress('写入联赛教练偏好片段')
-    for club in clubs:
-        manager = managers.get(club['uid'])
-        if manager is None:
-            continue
-        (fragments / f"{manager['person_selector']}.bin").write_bytes(bytes.fromhex(manager['fragment']))
-        rows.append({'person_selector': manager['person_selector'], 'profile_hex': manager['profile_hex'],
-                     'codes_hex': manager['codes_hex'],
-                     'ability_and_reputation_words': manager['ability_and_reputation_words'],
-                     'club_uid': club['uid'], 'uid': manager['uid']})
-        staff.append({'person_selector': manager['person_selector'], 'uid': manager['uid'],
-                      'unique_id': manager['unique_id'], 'name': manager['name'], 'club_uid': club['uid'],
-                      'team_id': manager.get('team_id'), 'team_slot': manager.get('team_slot'),
-                      'is_human_manager': False})
-    result = {'profile': LEAGUE_PROFILE, 'source_sha256': digest, 'date': index['date'],
-              'clubs': clubs, 'staff': staff, 'failures': [], 'no_match_cache_read': True,
-              'elapsed_seconds': round(time.monotonic() - started, 3)}
-    for name, value in [('source_team_table.json', {'records': [], 'source_sha256': digest}),
-                        ('staff_fragments.json', {'source_sha256': digest, 'rows': rows}),
-                        ('inputs.json', result)]:
-        (folder / name).write_text(json.dumps(value, ensure_ascii=False), encoding='utf8')
-    progress('联赛教练静态读取完成')
-    return {'coaches': len(rows), 'failures': [], 'elapsed_seconds': result['elapsed_seconds']}
+def _vacancy_candidate(staff, club_uid, team_id, date):
+    active = [row for row in staff if row.club_uid == club_uid and row.team_id == team_id
+              and row.team_slot == 0 and row.has_contract and not row.is_human_manager
+              and row.contract_start is not None and row.contract_start <= date
+              and (row.contract_end is None or date <= row.contract_end)]
+    managers = {row.uid:row for row in active if getattr(row.job, 'raw', None) == MANAGER_JOB}
+    if len(managers) > 1:
+        raise ValueError('主教练栏为空，有多份有效一线队主教练合同，无法唯一选择')
+    if not managers:
+        raise ValueError('主教练栏为空，未找到有效的一线队主教练合同')
+    return next(iter(managers.values())), 'manager_contract'
 
 
-def _prepare_scope(source, folder, index_path):
+def _referenced_coach(reader, db, selector, records, layout):
+    """Resolve a TEAM's one-based person reference against complete staff records."""
+    if selector in EMPTY_REFERENCES:
+        raise ValueError('存档中的一线队主教练位置为空')
+    person_id = selector - 1
+    lower, upper = reader._bracket_window(db, person_id, records)
+    needle = struct.pack('<I', person_id)
+    header_reader = reader._header_reader(layout)
+    ceiling = upper if upper < len(db) else None
+    match = None
+    hit = db.find(needle, lower, upper)
+    while hit >= 0:
+        identity = reader._header_values(db, hit, header_reader, layout)
+        if identity is not None and identity[1] == layout.staff_kind:
+            block, slots_ok, _, further_ok = reader._read_ability_block(db, hit, layout)
+            if block is not None and slots_ok and further_ok:
+                closing = reader._closing_header(db, person_id, hit, identity[0], ceiling, layout)
+                if closing is not None:
+                    if match is not None:
+                        raise ValueError('同一主教练引用对应多条完整职员记录，无法确认身份')
+                    match = hit, identity[0], closing
+        hit = db.find(needle, hit + 1, upper)
+    if match is None:
+        raise ValueError('一线队有主教练引用，但职员身份或战术偏好未通过校验')
+    return match
+
+
+def prepare(source, folder, index_path, selection_path=None):
     import desktop_save_compat
     desktop_save_compat.install()
     import fmsave
     import fmsave.readers.staff as reader
-    from desktop_save_worker import plain
     from desktop_generation_team_table import from_save
     from desktop_opponent_scope import identify
     from desktop_storage import bounded_output
@@ -213,12 +114,16 @@ def _prepare_scope(source, folder, index_path):
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     if digest != index['source_sha256']:
         raise ValueError('存档已更新，请重新读取存档')
-    own = index['managed'][0]['club_uid']
-    scope = identify(index, own)
-    if scope['league'] is None:
-        raise ValueError('当前存档同联赛范围尚未识别')
-    wanted = set(scope['league']['club_uids'])
-    clubs = [c for c in index['clubs'] if c['uid'] in wanted]
+    profile = LEAGUE_PROFILE if selection_path is not None else PROFILE
+    if selection_path is not None:
+        clubs = _registry(index, [c['uid'] for c in _read(selection_path)['clubs']])
+    else:
+        own = index['managed'][0]['club_uid']
+        scope = identify(index, own)
+        if scope['league'] is None:
+            raise ValueError('当前存档同联赛范围尚未识别')
+        wanted = set(scope['league']['club_uids'])
+        clubs = [c for c in index['clubs'] if c['uid'] in wanted]
     with fmsave.open(source) as save:
         with save._context.section('game_db') as db:
             progress('读取同联赛球队与现任主教练引用')
@@ -235,26 +140,29 @@ def _prepare_scope(source, folder, index_path):
             fragments = folder / FRAGMENT_DIRECTORY
             fragments.mkdir(exist_ok=True)
             managed = {m['club_uid'] for m in index['managed']}
+            contract_staff = None
             for team in table['records']:
                 club = next(c for c in clubs if any(t['team_id'] == team['team_id'] for t in c['teams']))
                 selector = team['coach_person_reference']
-                if club['uid'] in managed or selector == 0xffffffff:
+                if club['uid'] in managed:
                     continue
                 progress('定向读取同联赛教练 ' + str(len(rows) + 1) + ' / ' + str(len(table['records']) - len(managed)))
-                header = reader.locate_listed_header(db, selector - 1, records, layout)
-                if not isinstance(header, int):
-                    failures.append({'selector': selector, 'error': '教练对象头未唯一定位'})
-                    continue
-                identity = reader._header_values(db, header, reader._header_reader(layout), layout)
-                block, slots_ok, _codes_ok, further_ok = reader._read_ability_block(db, header, layout)
-                if identity is None or block is None or not (slots_ok and further_ok):
-                    failures.append({'selector': selector, 'error': '教练偏好字段未通过结构校验'})
-                    continue
-                _, ceiling = reader._bracket_window(db, selector - 1, records)
-                closing = reader._closing_header(db, selector - 1, header, identity[0],
-                                                 ceiling if ceiling < len(db) else None, layout)
-                if closing is None:
-                    failures.append({'selector': selector, 'error': '教练结尾身份未通过校验'})
+                assignment = 'first_team_reference'
+                candidate = None
+                try:
+                    if selector in EMPTY_REFERENCES:
+                        if contract_staff is None:
+                            contract_staff, headers = _contract_staff(save, reader, db)
+                        candidate, assignment = _vacancy_candidate(contract_staff, club['uid'], team['team_id'], save.info.game_date)
+                        entry = headers.get(candidate.uid)
+                        if entry is None or not candidate.name or candidate.unique_id is None or entry[1] != candidate.unique_id:
+                            raise ValueError('一线队职员合同身份未通过核对')
+                        selector = entry[0]
+                    header, uid, closing = _referenced_coach(reader, db, selector, records, layout)
+                    if candidate and (candidate.uid != uid or candidate.unique_id != closing[1]):
+                        raise ValueError('一线队职员合同与偏好记录的身份不符')
+                except ValueError as error:
+                    failures.append({'club_uid': club['uid'], 'selector': selector, 'error': str(error)})
                     continue
                 lo, hi = reader._person_block_window(db, header, None, closing[0], layout)
                 person = decoder.decode(db, lo, hi)
@@ -271,14 +179,15 @@ def _prepare_scope(source, folder, index_path):
                              'codes_hex': bytes(db[base + layout.codes_offset:
                                                   base + layout.codes_offset + layout.code_count]).hex(),
                              'ability_and_reputation_words': list(struct.unpack_from('<5H', db, base - 6))})
-                staff.append({'person_selector': selector, 'uid': identity[0], 'unique_id': closing[1],
-                              'name': person[reader._PERSON_NAME] if person else str(closing[1]),
+                staff.append({'person_selector': selector, 'uid': uid, 'unique_id': closing[1],
+                              'name': candidate.name if candidate else (person[reader._PERSON_NAME] if person else str(closing[1])),
+                              'team_id':team['team_id'], 'coach_assignment':assignment,
                               'club_uid': club['uid'], 'is_human_manager': False})
     after = source.stat()
     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
         raise ValueError('读取期间存档发生变化')
     table['source_sha256'] = digest
-    result = {'profile': PROFILE, 'source_sha256': digest, 'date': index['date'], 'clubs': clubs,
+    result = {'profile': profile, 'source_sha256': digest, 'date': index['date'], 'clubs': clubs,
               'staff': staff, 'failures': failures, 'elapsed_seconds': round(time.monotonic() - started, 3),
               'no_match_cache_read': True}
     for name, value in [('source_team_table.json', table),
@@ -287,13 +196,6 @@ def _prepare_scope(source, folder, index_path):
         (folder / name).write_text(json.dumps(value, ensure_ascii=False), encoding='utf8')
     progress('教练静态读取完成，核对原版读回与原装预设')
     return {'coaches': len(rows), 'failures': failures, 'elapsed_seconds': result['elapsed_seconds']}
-
-
-def prepare(source, folder, index_path, selection_path=None):
-    if selection_path is not None:
-        return _prepare_league(source, folder, index_path, selection_path)
-    return _prepare_scope(source, folder, index_path)
-
 
 if __name__ == '__main__':
     print(json.dumps(prepare(*sys.argv[1:]), ensure_ascii=False), flush=True)

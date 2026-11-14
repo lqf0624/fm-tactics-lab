@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FM27 Tactics Lab",
+  "version": "1.114.6",
+  "identifier": "com.fmtacticslab.fm27",
+  "build": { "frontendDist": "../src/tactics_ui" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "create": false,
+        "title": "FM27 Tactics Lab",
+        "width": 1540,
+        "height": 1000,
+        "minWidth": 840,
+        "minHeight": 620,
+        "useHttpsScheme": true,
+        "devtools": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: https://ipc.localhost; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": { "active": false, "icon": ["../assets/app-icon.ico"] }
+}

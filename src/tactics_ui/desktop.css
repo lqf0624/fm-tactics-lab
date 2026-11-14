@@ -17,3 +17,20 @@
 .random-options .empty{padding:18px}.random-options .empty .symbol{display:none}.random-options .empty h2{font-size:16px;color:var(--text)}.random-options .pool-table td:first-child{white-space:normal;overflow-wrap:anywhere}
 .run-inputs{flex-wrap:wrap;justify-content:flex-end}#random-manage{white-space:nowrap}
 @media(max-width:850px){.random-options{right:12px;width:calc(100vw - 94px)}}
+
+.action-error:not([hidden]) { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin: 12px 24px; }
+.action-error p { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 0; }
+
+.desktop-pitch, .preview-pitch { container-type: inline-size; }
+.desktop-pitch .pitch-slot .slot-name, .preview-pitch .preview-player .slot-name {
+  width: 110px;
+  max-width: min(110px, calc(100cqw - 4px));
+  position: relative;
+  left: 50%;
+  transform: translateX(clamp(calc(2px - var(--pitch-x)), -50%, calc(100cqw - var(--pitch-x) - 100% - 2px)));
+  font-size: 11px;
+}
+.desktop-pitch .pitch-slot:is(:focus,:hover), .preview-pitch .preview-player:is(:focus,:hover) { z-index: 9; }
+.desktop-pitch .pitch-slot:is(:focus,:hover) .slot-name, .preview-pitch .preview-player:is(:focus,:hover) .slot-name { background: #233e36; width: max-content; max-width: 150px; white-space: normal; }
+
+.score small { font-size: 11px; font-weight: 400; letter-spacing: normal; white-space: nowrap; }

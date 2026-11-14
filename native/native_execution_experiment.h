@@ -92,6 +92,7 @@ static void execution_sample(void* actor,uintptr_t a,uintptr_t b,void* rng,uintp
   if(components[Understanding]>=0&&(player[0xcd8]!=execution_overall(player,components)
       ||player[0xcd9]!=components[BuyIn]||player[0xcda]!=components[Opposition]))desktop_finish_and_exit(245);
   for(unsigned i=0;i<26;i++)if(original_roster[side][i]==player){
+   if(!execution_input_seen[side][i])execution_input_ca[side][i]=*(uint16_t*)(player+0xc98);
    memcpy(execution_applied_record[side][i],player+0xcba,34);
    execution_player_samples[side][i]++;
    break;
@@ -165,15 +166,17 @@ static void execution_snapshot(unsigned char* match,const char* stage){
    fputc('}',log_file);
   }
   fprintf(log_file,",\"build_calls\":%llu,\"sample_calls\":%llu,\"players\":[",execution_builds[side],execution_samples[side]);
-  // Report each original roster identity and its last applied record.
+  // An early departure can leave an action sample without a builder call.
+  // Include the record actually applied by either hook.
   bool first=true;
   for(unsigned i=0;i<team[0x72d];i++){
-   if(!execution_input_seen[side][i])continue;
+   if(!execution_input_seen[side][i]&&!execution_player_samples[side][i])continue;
    const auto record=execution_applied_record[side][i];
    fprintf(log_file,"%s{\"slot\":%u,\"overall\":%u,\"buy_in\":%u,\"next_match_information\":%u,\"raw_ability_component\":%u,\"role_suitability_component\":%u,",first?"":",",i,record[30],record[31],record[32],record[28],record[29]);
    first=false;
    if(execution_policy[side]<0)fprintf(log_file,"\"ability_contribution\":%d,",execution_ability_from_components(record[28],record[29],execution_components[side]));
-   fprintf(log_file,"\"input_roster_slot\":%u,\"input_ca\":%u,\"calculated_overall_before_override\":%u,\"player_sample_calls\":%u,",i,execution_input_ca[side][i],execution_calculated_overall[side][i],execution_player_samples[side][i]);
+   fprintf(log_file,"\"input_roster_slot\":%u,\"input_ca\":%u,\"player_sample_calls\":%u,",i,execution_input_ca[side][i],execution_player_samples[side][i]);
+   if(execution_input_seen[side][i])fprintf(log_file,"\"calculated_overall_before_override\":%u,",execution_calculated_overall[side][i]);
    fputs("\"record_hex\":\"",log_file);
    for(unsigned j=0;j<34;j++)fprintf(log_file,"%02x",record[j]);fputs("\"}",log_file);
   }

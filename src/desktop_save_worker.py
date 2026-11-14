@@ -187,7 +187,7 @@ def main(source, folder):
     desktop_save_compat.install()
     import fmsave
     from fmsave._container import match_file_entries, read_directory_entry, read_section
-    from fmsave.readers.tactics import find_tactics_layout, _read_tactic_record, _read_slot_block, _read_text
+    from fmsave.readers.tactics import find_tactics_layout, _read_tactic_record
     before = source.stat()
     def progress(stage):
         write(folder/'progress.json', {'status': 'reading', 'stage': stage})
@@ -196,6 +196,15 @@ def main(source, folder):
         digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     with fmsave.open(source) as save:
         info = save.info
+        from desktop_save_draft import read_dataset
+        draft = read_dataset(save, folder, source, digest)
+        if draft is not None:
+            after = source.stat()
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise ValueError('解析期间存档发生变化，请等待游戏保存完成后重试')
+            write(folder/'dataset.json', draft)
+            write(folder/'progress.json', {'status':'complete','stage':'在线选秀数据读取完成'})
+            return
         managed = [plain(v) for v in save.managed_clubs()]
         clubs = [{**{k:getattr(v,k) for k in ['uid','unique_id','name','short_name','nation_id']},'teams':plain(v.teams)} for v in save.clubs()]
         progress('读取人类经理球队属性与球员身份索引')
@@ -248,9 +257,10 @@ def main(source, folder):
         section = read_section(save._container_index, 'tactics_man')
         layout = find_tactics_layout(info.section_schemas.get('tactics_man'), info.build)
         from desktop_save_setpieces import read_team_routines
-        from fmsave.readers.tactics import ReaderCheckError, UnsupportedGameError, _stored_block_starts
+        from fmsave.readers import tactics as reader
+        from fmsave.readers.tactics import ReaderCheckError, UnsupportedGameError
         setpieces = {}
-        stored_starts = _stored_block_starts(section, layout, source.name)
+        stored_starts = reader._stored_block_starts(section, layout, source.name)
         for club in clubs:
             if club['uid'] not in wanted or not club['teams']:
                 continue
@@ -261,38 +271,28 @@ def main(source, folder):
                     setpieces[str(team_id)] = routines
             except (ValueError, ReaderCheckError, UnsupportedGameError) as error:
                 warnings.append(f"{club['name']} 的定位球套路读取失败：{error}")
-        signatures = set([layout.user_signature, layout.alternate_signature, layout.preset_signature])
-        offsets = sorted({i for sig in signatures for i in find_all(section, sig)})
-        raw_plans = []
-        for number, start in enumerate(offsets):
-            end = offsets[number+1] if number+1 < len(offsets) else len(section)
-            try:
-                rec = _read_tactic_record(section, start, end, layout, source.name)
-                if not rec.walk_complete or not rec.oop_index_permutation:
-                    continue
-                # Walk the same bounded fields to find the exact end; no bytes
-                # from the following tactic or team are passed to the native reader.
-                cursor = start + len(layout.user_signature)
-                _, cursor = _read_text(section, cursor, end, layout, source.name, 'name')
-                cursor += layout.name_zero_bytes + layout.team_instruction_bytes
-                _, cursor = _read_text(section, cursor, end, layout, source.name, 'style')
-                cursor += layout.style_code_bytes
-                for _ in range(11):
-                    ip = _read_slot_block(section, cursor, end, layout, with_index_byte=False)
-                    op = _read_slot_block(section, ip.end, end, layout, with_index_byte=True)
-                    cursor = op.end
-                path = folder/f'tactic_{number}.bin'
-                # The slot walk is not the end of the plan. Retain its bounded
-                # tail (lineup/metadata); the native reader determines the exact
-                # consumed prefix and that prefix is verified again separately.
-                path.write_bytes(section[start:end])
-                raw_plans.append({'name': rec.name, 'path': path.name, 'slots': plain(rec.slots)})
-            except Exception:
-                continue
-        for t in tactics:
-            matches = [p for p in raw_plans if p['name'] == t['name'] and p['slots'] == t['slots']]
-            if matches:
-                t['raw_plan'] = matches[0]['path']
+        by_team = defaultdict(list)
+        for index, tactic in enumerate(tactics):
+            by_team[tactic['team_id']].append((index, tactic))
+        for team_id, start in reader._block_starts(section, by_team.keys(), layout).items():
+            end = next((offset for offset in stored_starts if offset > start), len(section))
+            selection = reader._read_selection_part(section, start, end, layout, source.name)
+            _, _, records_end = reader._read_routines(section, selection.end, end, layout)
+            cursor = selection.end
+            for index, tactic in sorted(by_team[team_id], key=lambda row: row[1]['index']):
+                offset, _ = reader._next_signature(section, cursor, records_end, layout)
+                if offset is None:
+                    break
+                cursor = offset + len(layout.user_signature)
+                following, _ = reader._next_signature(section, cursor, records_end, layout)
+                boundary = records_end if following is None else following
+                record = _read_tactic_record(section, offset, boundary, layout, source.name)
+                if (record.walk_complete and record.oop_index_permutation
+                        and record.name == tactic['name'] and plain(record.slots) == tactic['slots']):
+                    path = folder/f'tactic_{index}.bin'
+                    # The original reader determines and verifies the exact TAC end.
+                    path.write_bytes(section[offset:boundary])
+                    tactic['raw_plan'] = path.name
         # Same-league coach presets do not consume historical match recordings.
         caches=[]
         from desktop_opponent_scope import identify
@@ -316,16 +316,6 @@ def main(source, folder):
         raise ValueError('解析期间存档发生变化，请等待游戏保存完成后重试')
     write(folder/'dataset.json', result)
     write(folder/'progress.json', {'status':'complete','stage':'存档数据读取完成'})
-
-
-def find_all(data, pattern):
-    start = 0
-    while True:
-        start = data.find(pattern, start)
-        if start < 0:
-            return
-        yield start
-        start += len(pattern)
 
 
 def club_registry(source, folder):

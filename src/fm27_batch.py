@@ -87,8 +87,9 @@ class MatchCancellation:
         if self.handle:self.kernel.CloseHandle(self.handle);self.handle=None
 
 class BatchRunner:
-    def __init__(self,root,workers=1,retries=1,timeout=190):
+    def __init__(self,root,workers=1,retries=1,timeout=190,*,host=None):
         self.root=Path(root);self.workers=workers;self.retries=retries;self.timeout=timeout
+        self.host=Path(host) if host is not None else self.root/'fm27_native/FM27Simulator.exe'
         self.stop=threading.Event();self.lock=threading.Lock();self.processes={};self.active={};self.cancellations={}
         self.cleanup_timeout=15
     def cancel(self):
@@ -114,7 +115,7 @@ class BatchRunner:
             if reason=='timeout':raise RuntimeError('原生宿主超时，已请求正常清理后退出')
             return stdout
     def command(self,task,path):
-        command=[str(self.root/'fm27_native/FM27Simulator.exe'),'--output',str(path),'--tick-step',str(task.get('tick_step',1))]
+        command=[str(self.host),'--output',str(path),'--tick-step',str(task.get('tick_step',1))]
         if task['seed']is not None:command+=['--seed',str(task['seed'])]
         if task.get('config'):command+=['--scenario-file',str(task['config'])]
         if task.get('fixture'):command+=['--fixture',str(task['fixture'])]

@@ -7,14 +7,19 @@ Nonempty counted secondary slot maps are walked without changing native bytes.
 This adapter is installed only inside the private save-reader process.
 """
 from dataclasses import replace
+from pathlib import Path
+import sys
 
-PROFILE = 'fm27-save-2486695-2503222-v8'
+PROFILE = 'fm27-save-2486695-2503222-v10'
 LATER_BUILDS = ('27.0.0+2493426', '27.0.1+2494687', '27.0.1+2503222')
 FRAME_DECOMPRESSED_CAP = 768 * 1024**2
 TOTAL_DECOMPRESSED_CAP = 1536 * 1024**2
 
 
 def install():
+    vendor = Path(__file__).with_name('vendor')
+    if vendor.is_dir() and str(vendor) not in sys.path:
+        sys.path.insert(0, str(vendor))
     from fmsave import _layouts, _version
     from fmsave._layouts import GameInfoLayout, TacticsLayout
     if getattr(_layouts,'_fm27_desktop_profile',None)==PROFILE:
@@ -54,6 +59,9 @@ def install():
     _install_slot_map_reader(tuple(e.layout for e in registered
                                   if isinstance(e.layout,TacticsLayout)
                                   and e.build in ('27.0.0+2486695', *LATER_BUILDS)))
+    _install_tactic_section_reader(tuple(e.layout for e in registered
+                                       if isinstance(e.layout,TacticsLayout)
+                                       and e.build in LATER_BUILDS))
     read_game_info_facts=_version.read_game_info_facts
 
     def read_registered_game_info(container, schemas, version, known_build):
@@ -66,7 +74,80 @@ def install():
         return read_game_info_facts(container,schemas,version,known_build)
 
     _version.read_game_info_facts=read_registered_game_info
+    from desktop_save_draft import read_summary
+    original_summary = _version.read_summary_facts
+
+    def read_registered_summary(container):
+        try:
+            return original_summary(container)
+        except _version.ReaderCheckError:
+            draft = read_summary(container)
+            if draft is None:
+                raise
+            return draft[0]
+
+    _version.read_summary_facts = read_registered_summary
     _layouts._fm27_desktop_profile=PROFILE
+
+
+def _install_tactic_section_reader(layouts):
+    from fmsave.readers import tactics
+
+    read_text = tactics._read_text
+    find_signature = tactics._next_signature
+    find_starts = tactics._stored_block_starts
+    find_club_starts = tactics._block_starts
+
+    def text(section, cursor, end, layout, filename, what):
+        if layout in layouts and what in ('a tactic style label', 'style'):
+            # A customized style label is a bounded UTF-8 string, independent of
+            # the shorter team selection label and tactic name fields.
+            layout = replace(layout, name_length_range=(layout.name_length_range[0], 16384))
+        return read_text(section, cursor, end, layout, filename, what)
+
+    def signature(section, cursor, end, layout):
+        offset, is_user = find_signature(section, cursor, end, layout)
+        if layout in layouts:
+            # The in-save alternate flags are 2 and 3. Both retain the same
+            # team instructions, slot grammar and native boundary validation.
+            extra = section.find(layout.user_signature[:-1] + b'\x03', cursor, end)
+            if extra >= 0 and (offset is None or extra < offset):
+                return extra, True
+        return offset, is_user
+
+    def starts(section, layout, filename):
+        offsets = find_starts(section, layout, filename)
+        if layout not in layouts or not offsets or offsets[0] != layout.first_block_offset:
+            return offsets
+        selector, count = tactics.read_tactics_header(section, layout, filename)
+        if not count or len(offsets) != count * 2:
+            return offsets
+        # Some saves append a second selection table after the AI preset area.
+        # Its repeated manager/count header and team IDs identify the second table.
+        duplicate_header = b'\x01\x00\x01\x0d' + selector.to_bytes(4, 'little') + count.to_bytes(4, 'little')
+        second = offsets[count]
+        if section[second-len(duplicate_header):second] != duplicate_header:
+            return offsets
+        primary, secondary = offsets[:count], offsets[count:]
+        team_ids = lambda rows: [section[start:start+4] for start in rows]
+        if team_ids(primary) != team_ids(secondary) or len(set(team_ids(primary))) != count:
+            return offsets
+        return primary
+
+    def club_starts(section, team_ids, layout):
+        result = find_club_starts(section, team_ids, layout)
+        if layout in layouts and len(result) < len(team_ids):
+            structural = starts(section, layout, 'tactics_man')
+            for team_id in team_ids:
+                hits = [offset for offset in structural if int.from_bytes(section[offset:offset+4], 'little') == team_id]
+                if len(hits) == 1:
+                    result[team_id] = hits[0]
+        return result
+
+    tactics._read_text = text
+    tactics._next_signature = signature
+    tactics._stored_block_starts = starts
+    tactics._block_starts = club_starts
 
 
 def _install_slot_map_reader(layouts):

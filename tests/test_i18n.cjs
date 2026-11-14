@@ -17,7 +17,7 @@ async function environment(system,browser){
   fetch:async()=>({ok:true,json:async()=>({language:system})}),
   MutationObserver:class{constructor(fn){callback=fn;}observe(){}disconnect(){}}};
  vm.createContext(context);
- for(const file of ['i18n-en.js','i18n.js'])vm.runInContext(fs.readFileSync(path.join(ui,file),'utf8'),context);
+ for(const file of ['desktop-transport.js','i18n-en.js','i18n.js'])vm.runInContext(fs.readFileSync(path.join(ui,file),'utf8'),context);
  // Browser globals expose window properties as identifiers.
  await context.window.FM27I18n.ready;
  return {context,title,status,log,name,control,original,state,mutate:node=>callback([{type:'characterData',target:node}])};

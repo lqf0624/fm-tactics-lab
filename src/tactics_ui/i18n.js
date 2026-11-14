@@ -64,7 +64,7 @@ window.FM27I18n = (() => {
   }
   observer.observe(document.documentElement,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['title','placeholder','aria-label']});
  }
- const ready = fetch('/api/locale').then(response=>{if(!response.ok)throw Error('locale');return response.json();})
+ const ready = editorRequest('/api/locale')
   .then(result=>{language=normalize(result.language);}).catch(()=>{}).then(()=>{
    document.documentElement.lang=language;
    if(language==='en'){

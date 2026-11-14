@@ -243,6 +243,8 @@ class _App:
         self.NATIVE=root/'native';self.NATIVE.mkdir()
         self.desktop_engine=_Engine();self.ENGINE_COMPATIBILITY={'resource_fingerprint':'test'}
 
+    def native_host(self):return self.NATIVE/'FM27Simulator.exe'
+
 def tactic_cells():
     return [{'position':'GK'if index==0 else'DC','role':'GK'if index==0 else'DC','duty':'0',
              'instructions':{},'target_player':255,'target_position':0}for index in range(11)]
@@ -891,7 +893,7 @@ class RealGenerationPayloadTests(unittest.TestCase):
         self.assertIn(100024,{player['unique_id']for player in chosen})
     def test_side_record_rejects_out_of_range_formation_codes(self):
         inputs=self.inputs();club=inputs['clubs'][1];coach=inputs['staff'][1]
-        native=self.native();extra=bytearray(bytes.fromhex(native['native_d4_to_f4_hex']));extra[11]=65
+        native=self.native();extra=bytearray(bytes.fromhex(native['native_d4_to_f4_hex']));extra[11]=255
         native['native_d4_to_f4_hex']=extra.hex()
         with self.assertRaises(ValueError)as caught:
             desktop_real_generation._side_record(inputs,club,coach,native,False,desktop_real_generation.roster(inputs,2))

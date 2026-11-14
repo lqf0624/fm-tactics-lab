@@ -15,7 +15,7 @@ FRAGMENTS='staff_fragments'
 MANAGER_JOB=16
 MAX_ROSTER=23
 VARIANT_LABELS={'A':'主场','H':'客场'}
-PREP_VERSION=3
+PREP_VERSION=4
 _VERIFIED={}
 
 
@@ -178,7 +178,7 @@ def _side_record(inputs,club,coach,native,human,players):
     extra=bytes.fromhex(native['native_d4_to_f4_hex'])
     codes=extra[11:19]
     ordered=bytes(codes[index]for index in (0,1,3,2,4,5,7,6))
-    if len(profile)!=52 or any(value>100 for value in profile) or any(value>64 for value in ordered):
+    if len(profile)!=52 or max(profile)>100 or max(ordered)>desktop_generation_protocol.MAX_FORMATION_CODE:
         raise ValueError('该队主教练档案的参数超出原版生成范围，暂不支持该队的真实战术生成')
     personality=coach['personality']
     traits=native['generation_trait_pairs']

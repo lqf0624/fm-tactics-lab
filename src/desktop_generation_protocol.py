@@ -2,6 +2,7 @@
 import struct
 
 PROFILE='controlled-fresh-duel-v1'
+MAX_FORMATION_CODE = 69
 
 
 def normalize(value,teams):
@@ -15,7 +16,7 @@ def normalize(value,teams):
         p=payload[8+288*side:8+288*(side+1)]
         count=struct.unpack_from('<I',p,12)[0];mode=struct.unpack_from('<I',p,272)[0]
         if mode not in (0,1)or not 11<=count<=23 or count!=team.get('roster_size',26):raise ValueError('电脑球队比赛名单不一致')
-        if struct.unpack_from('<I',p,8)[0]>10000 or max(p[16:68])>100 or max(p[68:76])>64 or max(p[76:83])>20 or p[83]>100 or struct.unpack_from('<H',p,194)[0]>32:raise ValueError('电脑教练参数越界')
+        if struct.unpack_from('<I',p,8)[0]>10000 or max(p[16:68])>100 or max(p[68:76])>MAX_FORMATION_CODE or max(p[76:83])>20 or p[83]>100 or struct.unpack_from('<H',p,194)[0]>32:raise ValueError('电脑教练参数越界')
         uids=list(struct.unpack_from('<'+str(count)+'I',p,84))
         if len(set(uids))!=count or uids!=[r.get('source_uid')for r in team['players'][:count]]:raise ValueError('生成输入与真实球员身份不一致')
     return {'profile':PROFILE,'payload_hex':payload.hex()}

@@ -36,6 +36,22 @@ def identify(data,club):
             postseason.append(candidate)
     # Prefer an active or upcoming season before a recently completed table.
     candidates = active or preseason or postseason
+    if not candidates:
+        # The compact fixture list may cover only the human manager's country.
+        # The save reader's league catalogue was validated against the full calendar.
+        current,upcoming,recent=[],[],[]
+        for entry in data.get('leagues',[]):
+            members=entry.get('club_uids',[])
+            if club not in members or not entry.get('complete') or not 4<=len(members)<=40:continue
+            first,last=entry.get('first_date'),entry.get('last_date')
+            if not first or not last:continue
+            candidate={'competition_id':entry['competition_id'],'stage_id':entry['stage_id'],
+                       'season_start_year':entry.get('season'),'club_uids':members,
+                       'fixture_count':entry['fixture_count'],'first_date':first,'last_date':last}
+            if first<=data['date']<=last:current.append(candidate)
+            elif timedelta(0)<date.fromisoformat(first)-save_date<=PRESEASON_WINDOW:upcoming.append(candidate)
+            elif timedelta(0)<save_date-date.fromisoformat(last)<=PRESEASON_WINDOW:recent.append(candidate)
+        candidates=current or upcoming or recent
     league=candidates[0] if len(candidates)==1 else None
     members=set(league['club_uids'])-{club} if league else set()
     return {'profile':PROFILE,'played':played,'same_league':members,'league':league,'ambiguous_leagues':candidates if len(candidates)>1 else []}
@@ -43,16 +59,18 @@ def identify(data,club):
 def annotate(report,data,club,scope):
     available={o['club_uid']:o for o in report['opponents']}
     names={c['uid']:c.get('short_name') or c['name'] for c in data['clubs']}
+    names.update({int(uid):c.get('short_name') or c['name'] for uid,c in data.get('league_clubs',{}).items()})
     requested=scope['played']|scope['same_league']
     for o in report['opponents']:
         o.update(has_played=o['club_uid'] in scope['played'],same_league=o['club_uid'] in scope['same_league'],
-            plan_policy='coach_preference_preset'if o.get('source_kind')=='coach_preference_preset'else'observed_plan_any_date_same_club')
+            plan_policy=o['source_kind'] if o.get('source_kind') in ('coach_preference_preset','assistant_preference_preset') else'observed_plan_any_date_same_club')
+    reasons={row['club_uid']:row['reason'] for row in report.get('unrecovered_clubs',[])}
     report.update(scope_profile=PROFILE,league=scope['league'],league_ambiguous=bool(scope['ambiguous_leagues']),
         same_league_clubs=len(scope['same_league']),same_league_available=len(scope['same_league']&available.keys()),
         requested_teams=[{'club_uid':uid,'name':names.get(uid,str(uid)),'has_played':uid in scope['played'],
             'same_league':uid in scope['same_league'],'available':uid in available,
             'key':available[uid]['key'] if uid in available else None,
-            'reason':None if uid in available else ('该队教练偏好预设暂不可用，请查看解析提示'if report.get('source_policy')=='coach_preference_preset'else'该队完整存储方案尚未恢复')}
+            'reason':None if uid in available else reasons.get(uid,('该队教练偏好预设暂不可用，请查看解析提示'if report.get('source_policy')=='coach_preference_preset'else'该队完整存储方案尚未恢复'))}
             for uid in sorted(requested)],plan_policy='coach_preference_preset'if any(o.get('source_kind')=='coach_preference_preset'for o in report['opponents'])else'any_stored_date_same_club')
     report['opponents'].sort(key=lambda o:(not o['same_league'],not o['has_played'],o['club_uid']))
     return report

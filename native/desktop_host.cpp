@@ -65,6 +65,8 @@ static int audit_policies(){
     }
     fflush(log_file);return 0;
 }
+static constexpr uint32_t current_pi_policy_version=0x1b000000u;
+static constexpr unsigned pi_policy_version_offsets[]={0xf0,0x430,0x750,0x798};
 struct ScenarioEdit {uint32_t kind,side,a,b,value;};
 static std::vector<ScenarioEdit> scenario_edits;
 static std::vector<unsigned char> source_generation_config;
@@ -160,7 +162,16 @@ static bool apply_scenario(unsigned char* match,bool tactics_only=false){
         current_scenario_edit=edit;scenario_stage="records";
         if(edit.side>1)return false;
         auto team=*(unsigned char**)(match+0x15380+8*edit.side);
-        if(edit.kind==61){
+        if(edit.kind==62){
+            if(edit.side||edit.a||edit.b||edit.value!=current_pi_policy_version)return false;
+            // Native preparation takes the plan versions from the match, not
+            // from the old carrier's plan. Set the input plan for PI checks and export too.
+            *(uint32_t*)(match+0xa3a)=edit.value;
+            for(unsigned side=0;side<2;side++){
+                auto manager=*(unsigned char**)(*(unsigned char**)(match+0x15380+8*side)+0x630);
+                for(auto offset:pi_policy_version_offsets)*(uint32_t*)(manager+0x1818+offset)=edit.value;
+            }
+        }else if(edit.kind==61){
             if(edit.a>4||edit.b||edit.value>100)return false;
         }else if(edit.kind==17){
             if(edit.value<11||edit.value>team[0x72d])return false;
@@ -366,6 +377,13 @@ static bool verify_scenario(unsigned char* match){
     for(const auto& edit:scenario_edits){
         auto team=*(unsigned char**)(match+0x15380+8*edit.side);
         auto manager=*(unsigned char**)(team+0x630);
+        if(edit.kind==62){
+            if(*(uint32_t*)(match+0xa3a)!=edit.value)return false;
+            for(unsigned side=0;side<2;side++){
+                auto prepared=*(unsigned char**)(*(unsigned char**)(match+0x15380+8*side)+0x630);
+                for(auto offset:pi_policy_version_offsets)if(*(uint32_t*)(prepared+0x1818+offset)!=edit.value)return false;
+            }
+        }
         if(edit.kind==1){auto player=original_roster[edit.side][edit.a];if(player[0x480+edit.b]!=edit.value)return false;}
         if(edit.kind==17&&team[0x72d]!=edit.value)return false;
         if(edit.kind==18){
@@ -612,7 +630,18 @@ static bool fingerprint_image(const fs::path& path){
     }
     return okay;
 }
-static bool known_image(const fs::path& path){return compatible_image(path)&&fingerprint_image(path);}
+static bool known_image(const fs::path& path){
+#ifdef FM27_COMPAT_DIGEST_RANGES
+    if(!fingerprint_image(path)||strcmp(native_image_sha256,epic_reference_sha256)){
+        fprintf(log_file,"{\"event\":\"native_engine_compatibility\",\"compatible\":false,\"trial_allowed\":false,\"reason\":\"epic_build_fingerprint_mismatch\"}\n");
+        fflush(log_file);
+        return false;
+    }
+    return compatible_image(path);
+#else
+    return compatible_image(path)&&fingerprint_image(path);
+#endif
+}
 #include "native_statistics.h"
 #include "native_fmf_probe.h"
 #include "native_tactic_import.h"

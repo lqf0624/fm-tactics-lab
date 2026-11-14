@@ -28,6 +28,13 @@ def locate(data,header,selector,native_uid):
                 'raw_52_bytes_hex':profile.hex(),'formation_codes_hex':codes.hex(),
                 'ability_and_reputation_words':list(reps),'entry_count':count,
                 'profile_offset':tag+1,'ability_offset':tag-13,'native_marshalling_verified':False})
+    if len(candidates)>1:
+        # FM27 writes each seven-byte entry as a one-byte marker followed by
+        # two three-byte values. Check their observed tags before accepting a
+        # count that could also occur inside the preceding human history.
+        candidates=[row for row in candidates if all(
+            data[offset:offset+2]==b'\x01\x05' and data[offset+4]==5
+            for offset in range(row['body_offset']+2,row['ability_offset']-6,7))]
     if len(candidates)!=1:raise ValueError('Human NON_PLAYER body not unique: '+str(len(candidates)))
     return candidates[0]
 

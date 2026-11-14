@@ -41,6 +41,20 @@ class OpponentScopeTests(unittest.TestCase):
         report=scope.identify({'fixtures':old+new,'date':'2026-07-01'},1)
         self.assertEqual(report['same_league'],{5,6,7})
 
+    def test_promoted_and_relegated_clubs_follow_each_seasons_fixtures(self):
+        old=round_robin([1,2,3,4],competition=7,season=2026)
+        old+=round_robin([5,6,7,8],competition=8,season=2026)
+        new=round_robin([1,2,3,5],competition=7,season=2027)
+        new+=round_robin([4,6,7,8],competition=8,season=2027)
+        for f in new:
+            f['date']=str(int(f['date'][:4])+1)+f['date'][4:]
+        rows=old+new
+        for clock,top,second in [('2027-02-06',4,5),('2028-04-08',5,4)]:
+            data={'fixtures':rows,'date':clock}
+            self.assertEqual(scope.identify(data,top)['league']['competition_id'],7)
+            self.assertEqual(scope.identify(data,second)['league']['competition_id'],8)
+            self.assertEqual(scope.identify(data,1)['same_league'],{2,3,top})
+
     def test_distant_old_schedule_is_not_current(self):
         rows=round_robin([1,2,3,4],season=2020)
         for row in rows:row['date']='2020-05-01'

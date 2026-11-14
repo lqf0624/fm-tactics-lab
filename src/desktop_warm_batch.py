@@ -13,18 +13,12 @@ import uuid
 from fm27_batch import BatchRunner, MatchCancellation, own_child_processes
 from fm27_simulator import inspect_log
 import fm27_match_events
-from desktop_storage import require_space
+from desktop_storage import require_space, write_json_atomic as save
 from desktop_execution import verify_execution_player, execution_receipts
 
 
 def sha(path):
     with Path(path).open('rb')as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
-
-
-def save(path,data):
-    temporary=path.with_name(path.name+'.tmp')
-    temporary.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf8')
-    os.replace(temporary,path)
 
 
 def read_rows(path,live=False):
@@ -58,9 +52,9 @@ class DesktopWarmRunner(BatchRunner):
         super().__init__(*args,**kwargs)
         self.session_diagnostics=[]
         self._abort=False
-        self.host_sha256=sha(self.root/'fm27_native/FM27Simulator.exe')
+        self.host_sha256=sha(self.host)
         if self.host_sha256 not in self._capabilities_cache:
-            result=subprocess.run([str(self.root/'fm27_native/FM27Simulator.exe'),'--worker-capabilities'],
+            result=subprocess.run([str(self.host),'--worker-capabilities'],
                 capture_output=True,timeout=10,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
             try:value=json.loads(result.stdout)if result.returncode==0 else {}
             except (ValueError,UnicodeError):value={}
@@ -180,7 +174,7 @@ class DesktopWarmRunner(BatchRunner):
                     env.pop('FM27_DESKTOP_EVENTS_AUDIT',None)
                 for name in list(env):
                     if name.startswith(('FM27_IMPORT_','FM27_EXPORT_','FM27_EPISODE_','FM27_SAVE_SECTION_','FM27_SAVED_CORE_','FM27_AI_'))or name=='FM27_DESKTOP_STATS_AUDIT':env.pop(name)
-                command=[str(self.root/'fm27_native/FM27Simulator.exe'),'--worker-manifest',str(manifest),
+                command=[str(self.host),'--worker-manifest',str(manifest),
                          '--output',str(startup),'--tick-step','1','--cancel-event',cancellation.name]
                 with self.lock:
                     if self.stop.is_set():return
@@ -222,6 +216,12 @@ class DesktopWarmRunner(BatchRunner):
                 output=process.communicate()[0].decode(errors='replace')
                 final=read_rows(startup,live=True)if startup.exists()else[]
                 cleanup=next((r for r in final if r['event']=='steam_session_cleanup'),None)
+                if not failure and process.returncode == 82 and any(
+                    row.get('event') == 'native_debug_text' and
+                    'did not locate a running instance of Steam' in row.get('text', '')
+                    for row in final
+                ):
+                    failure = '比赛引擎未连接到 Steam。请在同一 Windows 用户下启动 Steam，登录拥有 FM27 的账号，再继续未完成场次。'
                 record={'returncode':process.returncode,'completed':completed,'expected':len(chunk),'failure':failure,
                         'stdout':output,'wall_seconds':time.perf_counter()-began,'manifest_sha256':sha(manifest),
                         'steam_session_cleanup':cleanup,'session_log':str(startup.relative_to(root))}
@@ -238,7 +238,7 @@ class DesktopWarmRunner(BatchRunner):
                     publish(('failure',{'variant':current['variant'],'seed':current['seed'],'failed':True,
                         'failure_phase':'native_session','errors':[failure or f'原生会话退出 {process.returncode}，已完成 {completed}/{len(chunk)}'],
                         'attempts':1,'log':Path(current['path']).name,'session_receipt':str((folder/'lifetime.json').relative_to(root))}))
-                    publish(('error',RuntimeError('原生会话异常；已完成场次和失败现场均保留，不自动重跑')))
+                    publish(('error',RuntimeError(failure or '原生会话异常；已完成场次和失败现场均保留，不自动重跑')))
             except BaseException as error:
                 if process is not None and process.poll()is None:
                     cancellation.signal()
