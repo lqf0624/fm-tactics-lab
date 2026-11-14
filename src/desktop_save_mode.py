@@ -1113,7 +1113,8 @@ class SaveLibrary:
         team.pop('squad', None)
         desktop_static_plans.roster(self, key, club, team, starters if len(starters) == 11 else [])
         if len(starters) == 11:
-            people = {p['unique_id']: p for p in read(folder/'rosters'/f'{club}.json')}
+            people = {p['unique_id']: p for p in read(folder/'rosters'/f'{club}.json')
+                      if p.get('unique_id') is not None and p.get('club_uid') == club}
             chosen = [p['source_uid'] for p in team['players'][:11]]
             for uid in reserves:
                 if uid in people and uid not in chosen and len(chosen) < min(23,len(team['players'])):
@@ -1215,7 +1216,7 @@ class SaveLibrary:
         team['setpieces']['role_priorities']={k:[remap[i]for i in values if i in remap]for k,values in team['setpieces']['role_priorities'].items()}
         return app.validate_scenario(scenario)
 
-    OPPONENT_PROFILE='coach-preference-five-leagues-v25'
+    OPPONENT_PROFILE='coach-preference-five-leagues-v26'
 
     def opponent_report(self, path):
         if not path.exists():return None

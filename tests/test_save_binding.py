@@ -83,3 +83,17 @@ class SaveBindingTests(unittest.TestCase):
         owner=self.team('old-save')
         self.match(owner,{'players':[]},{'players':[{'source_uid':999}]},'new-save')
         self.assertEqual(owner['opposition']['players'][0],neutral())
+
+    def test_board_skips_stored_reserve_without_source_identity(self):
+        dataset = self.folder / 'dataset.json'
+        data = json.loads(dataset.read_text('utf8'))
+        data['selections'] = [dict(club_uid=680, team_slot=0, slot=i, substitute=i >= 11,
+                                   source_uid=i + 1 if i < 11 else None) for i in range(12)]
+        dataset.write_text(json.dumps(data), encoding='utf8')
+        roster = self.folder / 'rosters/680.json'
+        people = json.loads(roster.read_text('utf8'))
+        people.append({**people[0], 'unique_id': None, 'name': 'Unresolved reserve'})
+        roster.write_text(json.dumps(people), encoding='utf8')
+        result = self.load('board', None, 'new-save')
+        self.assertEqual(result['roster_size'], 11)
+        self.assertNotIn('source_uid', result['players'][11])

@@ -8,6 +8,25 @@ from fmsave.readers import tactics
 # Within each side the save groups routines by the serialized routine class.
 ROUTINE_GROUPS = ((0, 1, 4), (2, 3), (6, 9, 8), (5, 7))
 U32 = Struct('<I')
+U16 = Struct('<H')
+
+
+def routine_header_bytes(section, area, end, layout):
+    """Return the FM27 routine offset after the counted 26-byte header records."""
+    size = layout.routine_area_header_bytes
+    if size != 590 or area + size > end:
+        return size
+    count_at = area + size - 12
+    count, = U16.unpack_from(section, count_at)
+    if not count:
+        return size
+    records_end = count_at + U16.size + 26 * count
+    if records_end + 10 > end or section[records_end:records_end + 6] != b'\0\0\0\0\x3c\0':
+        return size
+    if any(section[offset - 2:offset] != b'\x01\x01'
+           for offset in range(count_at + U16.size + 26, records_end + 1, 26)):
+        return size
+    return records_end + 10 - area
 
 
 def read_routine(section, start, end, kind, layout):
@@ -65,10 +84,10 @@ def read_team_routines(section, team_id, layout, file_name, starts):
         raise ValueError('未找到完整的存档定位球区')
     if tuple(map(len, ROUTINE_GROUPS)) != layout.routine_group_sizes:
         raise ValueError('不支持此定位球分组格式')
-    next_plan, _ = tactics._next_signature(section, area + layout.routine_area_header_bytes, end, layout)
+    cursor = area + routine_header_bytes(section, area, end, layout)
+    next_plan, _ = tactics._next_signature(section, cursor, end, layout)
     if next_plan is not None:
         end = next_plan
-    cursor = area + layout.routine_area_header_bytes
     checked_names = []
     saved = {}
     for kinds in ROUTINE_GROUPS:

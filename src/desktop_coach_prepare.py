@@ -3,8 +3,8 @@ import hashlib,json,struct,sys,time
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).with_name('vendor')))
 
-PROFILE = 'static-first-team-coaches-v6'
-LEAGUE_PROFILE = 'static-league-coaches-v5'
+PROFILE = 'static-first-team-coaches-v7'
+LEAGUE_PROFILE = 'static-league-coaches-v6'
 FRAGMENT_DIRECTORY = 'first_team_staff_fragments'
 MANAGER_JOB = 16
 EMPTY_REFERENCES = (0, 0xffffffff)
@@ -95,6 +95,7 @@ def prepare(source, folder, index_path, selection_path=None):
     desktop_save_compat.install()
     import fmsave
     import fmsave.readers.staff as reader
+    from fmsave._errors import ReaderCheckError
     from desktop_generation_team_table import from_save
     from desktop_opponent_scope import identify
     from desktop_storage import bounded_output
@@ -141,6 +142,7 @@ def prepare(source, folder, index_path, selection_path=None):
             fragments.mkdir(exist_ok=True)
             managed = {m['club_uid'] for m in index['managed']}
             contract_staff = None
+            contract_error = None
             for team in table['records']:
                 club = next(c for c in clubs if any(t['team_id'] == team['team_id'] for t in c['teams']))
                 selector = team['coach_person_reference']
@@ -151,8 +153,13 @@ def prepare(source, folder, index_path, selection_path=None):
                 candidate = None
                 try:
                     if selector in EMPTY_REFERENCES:
-                        if contract_staff is None:
-                            contract_staff, headers = _contract_staff(save, reader, db)
+                        if contract_staff is None and contract_error is None:
+                            try:
+                                contract_staff, headers = _contract_staff(save, reader, db)
+                            except ReaderCheckError as error:
+                                contract_error = str(error)
+                        if contract_error is not None:
+                            raise ValueError('主教练栏为空，职员合同校验失败：' + contract_error)
                         candidate, assignment = _vacancy_candidate(contract_staff, club['uid'], team['team_id'], save.info.game_date)
                         entry = headers.get(candidate.uid)
                         if entry is None or not candidate.name or candidate.unique_id is None or entry[1] != candidate.unique_id:

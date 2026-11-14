@@ -8,6 +8,7 @@
 - Select clubs and opponents across the loaded top five leagues using current-season membership.
 - Add independent screening/retest rounds, per-round results and CSV fields, opposition neutralization, and cancellation/resume validation.
 - Resolve first-team coach references and reject unavailable or unverifiable AI opponents.
+- Read additional saved tactic, lineup and set-piece layouts. A club with an unverifiable coach no longer blocks the opponent list. Skip stored substitutes whose player identity cannot be verified when loading the current tactic board.
 - Preserve completed work when Windows temporarily blocks summary replacement and discard stale squad/opponent responses.
 - Fix the opponent-picker click handler, remap personal instructions when replacing a roster, and keep paired A/B statistics scoped to the active round.
 - Preserve unbound legacy roster drafts on startup, clear player-specific overrides when changing saves, and retain the original fixture identity in retest summaries.

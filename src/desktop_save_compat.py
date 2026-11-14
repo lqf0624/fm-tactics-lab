@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 import sys
 
-PROFILE = 'fm27-save-2486695-2503222-v10'
+PROFILE = 'fm27-save-2486695-2503222-v11'
 LATER_BUILDS = ('27.0.0+2493426', '27.0.1+2494687', '27.0.1+2503222')
 FRAME_DECOMPRESSED_CAP = 768 * 1024**2
 TOTAL_DECOMPRESSED_CAP = 1536 * 1024**2
@@ -21,7 +21,7 @@ def install():
     if vendor.is_dir() and str(vendor) not in sys.path:
         sys.path.insert(0, str(vendor))
     from fmsave import _layouts, _version
-    from fmsave._layouts import GameInfoLayout, TacticsLayout
+    from fmsave._layouts import GameInfoLayout, StaffLayout, TacticsLayout
     if getattr(_layouts,'_fm27_desktop_profile',None)==PROFILE:
         return
     _version.FM27_FRAME_DECOMPRESSED_CAP = FRAME_DECOMPRESSED_CAP
@@ -62,6 +62,9 @@ def install():
     _install_tactic_section_reader(tuple(e.layout for e in registered
                                        if isinstance(e.layout,TacticsLayout)
                                        and e.build in LATER_BUILDS))
+    _install_staff_code_reader(tuple(e.layout for e in registered
+                                    if isinstance(e.layout, StaffLayout)
+                                    and e.build in ('27.0.0+2486695', *LATER_BUILDS)))
     read_game_info_facts=_version.read_game_info_facts
 
     def read_registered_game_info(container, schemas, version, known_build):
@@ -92,11 +95,14 @@ def install():
 
 def _install_tactic_section_reader(layouts):
     from fmsave.readers import tactics
+    from desktop_save_setpieces import routine_header_bytes
 
     read_text = tactics._read_text
     find_signature = tactics._next_signature
     find_starts = tactics._stored_block_starts
     find_club_starts = tactics._block_starts
+    read_selection = tactics._read_selection_part
+    read_routine_groups = tactics._read_routine_groups
 
     def text(section, cursor, end, layout, filename, what):
         if layout in layouts and what in ('a tactic style label', 'style'):
@@ -114,6 +120,18 @@ def _install_tactic_section_reader(layouts):
             if extra >= 0 and (offset is None or extra < offset):
                 return extra, True
         return offset, is_user
+
+    def selection(section, start, end, layout, filename):
+        try:
+            return read_selection(section, start, end, layout, filename)
+        except tactics.ReaderCheckError:
+            if layout not in layouts:
+                raise
+            return _extended_tactic_selection(tactics, read_selection, section, start, end, layout, filename)
+
+    def routines(section, area, end, layout):
+        size = routine_header_bytes(section, area, end, layout) if layout in layouts else layout.routine_area_header_bytes
+        return read_routine_groups(section, area + size - layout.routine_area_header_bytes, end, layout)
 
     def starts(section, layout, filename):
         offsets = find_starts(section, layout, filename)
@@ -146,8 +164,50 @@ def _install_tactic_section_reader(layouts):
 
     tactics._read_text = text
     tactics._next_signature = signature
+    tactics._read_selection_part = selection
+    tactics._read_routine_groups = routines
     tactics._stored_block_starts = starts
     tactics._block_starts = club_starts
+
+
+def _extended_tactic_selection(reader, read_selection, section, start, end, layout, filename):
+    # Schema 26 also stores an extended footer: 01 05 01, then the same
+    # uint32 value and uint16 count. The meaning of the extra word is unconfirmed.
+    # The existing walker locates the footer after validating the selector lists.
+    candidate = read_selection(section, start, end, replace(layout, tactic_count_lead_byte=1), filename)
+    footer = candidate.end - 7
+    record_start = candidate.end + 2
+    extended_tag = b'\x01\x05\x01'
+    if section[footer:footer+3] != extended_tag or record_start + len(layout.user_signature) > end:
+        raise reader.layout_mismatch(filename, 'unrecognized tactic selection footer', reader.TACTICS_SECTION)
+    count = int.from_bytes(section[record_start-2:record_start], 'little')
+    signature_at, _ = reader._next_signature(section, record_start, record_start + len(layout.user_signature), layout)
+    if not count or count > (end - record_start) // len(layout.user_signature) or signature_at != record_start:
+        raise reader.layout_mismatch(filename, 'extended selection footer has no matching tactic records', reader.TACTICS_SECTION)
+    # Normalize the header for the descriptive reader only. Native plan and
+    # routine bytes keep their offsets and are read directly from the save.
+    header = section[start:footer] + bytes([layout.tactic_count_lead_byte]) + section[footer+3:record_start]
+    part = read_selection(header, 0, len(header), layout, filename)
+    if part.tactic_count != count:
+        raise reader.layout_mismatch(filename, 'inconsistent extended tactic count', reader.TACTICS_SECTION)
+    return replace(part, end=record_start)
+
+
+def _install_staff_code_reader(layouts):
+    from fmsave.readers import staff
+    read_ability = staff._read_ability_block
+
+    def ability(db, header, layout):
+        block, slots_ok, codes_ok, further_ok = read_ability(db, header, layout)
+        if block is not None and not codes_ok and layout in layouts:
+            # As in fmsave 0.9.3+, an entirely zero code list is unset in FM27.
+            # Mixed or unknown codes still count against the existing check.
+            entries = db[header + layout.entry_count_offset]
+            start = header + layout.ability_base_offset + layout.entry_bytes * entries + layout.codes_offset
+            codes_ok = not any(db[start:start + layout.code_count])
+        return block, slots_ok, codes_ok, further_ok
+
+    staff._read_ability_block = ability
 
 
 def _install_slot_map_reader(layouts):
