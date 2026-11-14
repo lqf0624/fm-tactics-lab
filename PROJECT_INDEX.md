@@ -18,5 +18,6 @@
 | 针对性指令、历史结果、实验续跑 | [experiment-results.md](docs/tasks/experiment-results.md) — 指令作用对象、结果汉化和 Windows 文件占用复测 |
 | 五大联赛选队与两轮测试 | [five-league-testing.md](docs/tasks/five-league-testing.md) — 96队目录、跨联赛对手、两轮种子与取消续跑验收 |
 | 换电脑、词库与运行依赖 | [portability.md](docs/tasks/portability.md) — v1114.6 全新数据目录、迁移路径、中文覆盖、系统运行库及数据迁移边界 |
+| 属性实验室 | [attribute-lab.md](docs/tasks/attribute-lab.md) — 同种子单属性实验、复测、续跑和报告 |
 | 安装、操作及已知故障 | [README.md](README.md) 是用户手册；[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) 是启动和引擎诊断；[SIMULATION_FIDELITY.md](docs/SIMULATION_FIDELITY.md) 说明模拟和统计口径 |
 | 构建与交付 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) 是上游构建说明；[RELEASE_CHECK.md](docs/RELEASE_CHECK.md) 是发布检查；[CONTRIBUTING.md](CONTRIBUTING.md) 说明私有数据边界；[tests/](tests/) 存放可复跑的回归用例 |

@@ -11,40 +11,52 @@ function attributeCheckedSlots(container) {
 
 async function openAttributeScreen() {
  const dialog = document.createElement('dialog');
- dialog.className = 'save-dialog';
+ dialog.className = 'save-dialog attribute-dialog';
+ dialog.setAttribute('aria-labelledby','attribute-dialog-title');
+ const career=saveMode==='save';
+ const selected=career?saveOpponents.filter(row=>saveChosen.has(row.key)&&row.available):[];
+ if(career&&(!saveLoaded||saveLoaded.save_id!==saveInfo?.id||saveLoaded.club_uid!==saveClub)){
+  toast('请先将所选球队载入战术板');return;
+ }
+ if(career&&(!selected.length||selected.length>8)){
+  toast('请先在存档对手中选择 1–8 支球队');return;
+ }
  const sides = editableTeamSides();
- dialog.innerHTML = `<h2>运行角色关键属性分析</h2>
-  <p>每个属性单独调整，默认提高 3 点。探索筛选后独立验证；不同对手等权汇总。</p>
-  <p class="tiny muted">默认使用当前固定对手；也可先在随机对手战术设置中导入 2–8 套战术，再选择全部战术做等权测试。</p>
-  <form>
-   <label>分析球队 ${select(sides.map(id => ({id, label: state.teams[id].name})), sides[0], 'data-screen-side')}</label>
+ const initialSide=sides.includes(side)?side:sides[0];
+ dialog.innerHTML = `<h2 id="attribute-dialog-title">属性实验室</h2>
+  <p>逐项调整属性，用同种子比赛比较，再用新种子复测。</p>
+  <form class="attribute-form">
+   <label class="attribute-team-picker">分析球队 ${select(sides.map(id => ({id, label: state.teams[id].name})), initialSide, 'data-screen-side')}</label>
    <fieldset class="attribute-slot-picker"><legend>分析范围</legend>
     <label class="attribute-slot-all"><input type="checkbox" data-screen-all>全选 11 个首发位置</label>
     <div class="attribute-slot-grid" data-screen-slots></div>
-    <p class="tiny muted">可以同时勾选任意几个位置；默认只选一个，控制首次试跑的比赛量。</p>
    </fieldset>
-   <label>起始种子 <input data-screen-seed type="number" min="0" max="4294967295" step="1" value="${esc($('#seed').value)}" required></label>
-   <label>属性范围 <select data-screen-scope><option value="broad">广泛筛选：外场 30 项，门将 39 项</option><option value="roles">角色候选四项（快速试跑）</option></select></label>
+   <div class="attribute-options">
+   <label>属性范围 <select data-screen-scope><option value="roles">角色候选（快速试跑）</option><option value="broad">广泛筛选：外场 30 项，门将 39 项</option></select></label>
    <label>属性提升点数 <input data-screen-increase type="number" min="1" max="19" step="1" value="3" required></label>
-   <p class="tiny muted">默认提高 3 点；测试值最高为 20。原值接近 20 时按实际可提升点数测试，已经为 20 的属性会跳过。</p>
-   <label>验证运行方式 <select data-screen-validation-mode><option value="two_stage">真正两阶段（默认，只复测入选候选）</option><option value="full">全部属性完整验证（耗时更长）</option></select></label>
+   </div>
+   ${career?`<p class="tiny muted">存档对手 · <span translate="no">${selected.map(o=>esc(o.name)).join('、')}</span></p>`:`<label>对手范围 <select data-screen-opponents><option value="current">当前固定对手</option><option value="pool">客队战术池全部战术（2–8 套，仅分析主队）</option></select></label>`}
+   <div class="attribute-options">
+   <label>探索配对场数 <input data-screen-discovery type="number" min="4" max="100" step="1" value="4" required></label>
+   <label>独立验证配对场数 <input data-screen-count type="number" min="2" max="200" step="1" value="4" required></label>
+   </div>
+   <details class="attribute-advanced"><summary>高级设置</summary>
+   <div class="attribute-options">
+   <label hidden>起始种子 <input data-screen-seed type="number" min="0" max="4294967295" step="1" value="${esc($('#seed').value)}" required></label>
+   <label>验证运行方式 <select data-screen-validation-mode><option value="two_stage">只复测入选候选</option><option value="full">全部属性完整验证（耗时更长）</option></select></label>
    <label>评估对象 <select data-screen-profile-mode><option value="current">当前球员实际属性</option><option value="standard">单属性档位敏感度（同一球员）</option></select></label>
    <label data-screen-levels-row hidden>标准属性档位 <input data-screen-levels value="8,12,16" pattern="[0-9,， ]+" required></label>
    <p class="tiny muted">标准档位会分别测试 8、12、16 等基准值，可修改为最多 3 个 1–19 的整数；比赛量会相应增加。</p>
-   <label>对手范围 <select data-screen-opponents><option value="current">当前固定对手</option><option value="pool">客队战术池全部战术（2–8 套，仅分析主队）</option></select></label>
-   <p class="tiny muted">多对手模式需先导入不同风格的客队战术，并开启统一客队属性。每套都测试，不随机抽签。</p>
-   <label>探索配对场数 <input data-screen-discovery type="number" min="4" max="100" step="1" value="4" required></label>
-   <label>独立验证配对场数 <input data-screen-count type="number" min="2" max="200" step="1" value="4" required></label>
    <label>稳定推荐参考配对数 <input data-screen-stable-min type="number" min="2" max="200" step="1" value="8" required></label>
    <p class="tiny muted">参考配对数只影响证据等级，不增加比赛量。较少场次仍可获得初步关注或一般推荐。</p>
-   <p class="tiny muted">建议先用探索 4 对、验证 4 对试跑；精度不足时再增加，不强制 20 对。</p>
    <label>候选收益线 <input data-screen-threshold type="number" min="0" max="1" step="0.005" value="0.02" required></label>
    <label>强候选收益线 <input data-screen-strong type="number" min="0" max="1" step="0.005" value="0.05" required></label>
    <label>每位置每榜候选上限 <input data-screen-candidates type="number" min="1" max="15" step="1" value="5" required></label>
    <label>总览最多推荐 <input data-screen-recommendations type="number" min="1" max="5" step="1" value="3" required></label>
    <p class="tiny muted">总收益榜和每点榜各取候选后去重。收益线作用于实际总收益；每点筛选线为收益线除以计划提升点数。每点效果仅代表本次测试区间。</p>
+   </div></details>
    <p data-screen-estimate class="tiny muted"></p><p data-screen-status role="status"></p>
-   <div class="header-actions"><button type="button" class="button" data-screen-close>关闭</button>
+   <div class="dialog-actions"><button type="button" class="button" data-screen-close>关闭</button>
     <button type="submit" class="button primary">开始分析</button></div>
   </form>`;
  const get = name => dialog.querySelector(`[data-screen-${name}]`);
@@ -54,25 +66,27 @@ async function openAttributeScreen() {
   const inputs=slotInputs(),selected=inputs.filter(input=>input.checked).length;
   get('all').checked=selected===inputs.length;get('all').indeterminate=selected>0&&selected<inputs.length;
  };
- const renderSlots = (team, selected=[10]) => {
+ const renderSlots = (team, selected=[slot]) => {
   const chosen=new Set(selected);
   get('slots').innerHTML=team.lineup.map((index,slot)=>`<label class="attribute-slot-option">
    <input type="checkbox" data-screen-slot value="${slot}" ${chosen.has(slot)?'checked':''}>
-   <span>${slot+1}. ${esc(team.players[index].name)} · ${esc(team.phases[0][slot].position)}</span></label>`).join('');
+   <span>${slot+1}. ${esc(displayName(team.players[index]))} · ${esc(team.phases[0][slot].position)}</span></label>`).join('');
   slotInputs().forEach(input=>input.onchange=()=>{syncAllSlots();estimate();});syncAllSlots();
  };
- renderSlots(state.teams[sides[0]]);
+ renderSlots(state.teams[initialSide]);
+ const randomSeeds=$('#seed-mode').value==='random';
+ get('seed').closest('label').hidden=randomSeeds;
+ get('seed').disabled=randomSeeds;
  const poolEntries=state.away_tactic_pool?.entries || [];
- const poolOption=get('opponents').querySelector('option[value="pool"]');
- poolOption.disabled=sides[0]!==0 || poolEntries.length<2 || poolEntries.length>8;
- if (!poolOption.disabled) get('opponents').value='pool';
+ const poolOption=get('opponents')?.querySelector('option[value="pool"]');
+ if(poolOption)poolOption.disabled=initialSide!==0 || poolEntries.length<2 || poolEntries.length>8 || !state.away_tactic_pool?.uniform?.enabled;
  const estimate = () => {
   const team = state.teams[Number(get('side').value)];
   const slots = selectedSlots();
   if (!slots.length) {get('estimate').textContent='请至少勾选一个首发位置。';return;}
   const attributeCounts=slots.map(slot=>get('scope').value==='roles'?4:team.phases[0][slot].position==='GK'?39:30);
   const attributes = attributeCounts.reduce((sum,value)=>sum+value,0);
-  const opponents = get('opponents').value==='pool' ? (state.away_tactic_pool?.entries?.length || 0) : 1;
+  const opponents = career ? selected.length : get('opponents').value==='pool' ? poolEntries.length : 1;
   const standard=get('profile-mode').value==='standard';
   const levels=standard?get('levels').value.split(/[,， ]+/).filter(Boolean).length:1;
   const explorationVariants=(standard?2*attributes*levels:1+attributes)*opponents;
@@ -86,14 +100,17 @@ async function openAttributeScreen() {
  get('side').onchange = () => {
   const team = state.teams[Number(get('side').value)];
   const away = Number(get('side').value) !== 0;
-  get('opponents').querySelector('option[value="pool"]').disabled = away||poolEntries.length<2||poolEntries.length>8;
-  if (get('opponents').querySelector('option[value="pool"]').disabled) get('opponents').value = 'current';
+  if(poolOption){
+   poolOption.disabled=away||poolEntries.length<2||poolEntries.length>8||!state.away_tactic_pool?.uniform?.enabled;
+   if(poolOption.disabled)get('opponents').value='current';
+  }
   renderSlots(team,selectedSlots());
   estimate();
  };
  get('all').onchange=()=>{slotInputs().forEach(input=>input.checked=get('all').checked);syncAllSlots();estimate();};
  get('count').oninput = estimate;
- get('scope').onchange = get('opponents').onchange = get('discovery').oninput = estimate;
+ get('scope').onchange = get('discovery').oninput = estimate;
+ if(!career)get('opponents').onchange=estimate;
  get('validation-mode').onchange=get('levels').oninput=estimate;
  get('profile-mode').onchange=()=>{get('levels-row').hidden=get('profile-mode').value!=='standard';estimate();};
  get('candidates').oninput = () => { get('recommendations').max=get('candidates').value; estimate(); };
@@ -104,7 +121,7 @@ async function openAttributeScreen() {
   const discovery = Number(get('discovery').value);
   const count = discovery + Number(get('count').value);
   const first = Number(get('seed').value);
-  if (!Number.isInteger(first) || !Number.isInteger(count) || first + count - 1 > 0xffffffff) {
+  if (!randomSeeds&&(!Number.isInteger(first)||first+count-1>0xffffffff)) {
    get('status').textContent = '种子范围无效';
    return;
   }
@@ -116,14 +133,15 @@ async function openAttributeScreen() {
   try {
    const response = await api('/api/run-attribute-screen', {
     scenario: clone(state), side: Number(get('side').value), slots,
-    research: true, exploration_count: discovery, attribute_scope: get('scope').value, opponents: get('opponents').value,
+    exploration_count: discovery, attribute_scope: get('scope').value,
+    ...(career?{save_id:saveInfo.id,club_uid:saveClub,opponents:selected.map(o=>o.key)}:{opponents:get('opponents').value}),
     attribute_increase: Number(get('increase').value),
     validation_mode:get('validation-mode').value,profile_mode:get('profile-mode').value,
     standard_levels:standardLevels,
     candidate_threshold: Number(get('threshold').value), strong_threshold: Number(get('strong').value),
     candidate_limit: Number(get('candidates').value), recommendation_limit: Number(get('recommendations').value),
     stable_min_pairs: Number(get('stable-min').value),
-    seeds: Array.from({length:count}, (_, index) => first + index),
+    ...(randomSeeds?{seed_mode:'random',count}:{seeds:Array.from({length:count},(_,index)=>first+index)}),
     workers: Number($('#workers').value), event_details: false,
    });
    dialog.close();
@@ -180,7 +198,7 @@ function attributeResearchReport(job) {
   const explored=all.filter(row=>row.exploration.n===settings.exploration_seeds.length).length;
   const validationTargets=validationMode==='full'?all:candidates;
   const validated=validationTargets.filter(row=>row.n===validationCount).length;
-  return `<tr><td>${slot+1}. <span translate="no">${esc(context.player)}</span><br>${context.phases.map(attributeRoleLabel).map(esc).join('<br>')}</td>
+  return `<tr><td>${slot+1}. <span translate="no">${esc(context?.player)}</span><br>${(context?.phases||[]).map(attributeRoleLabel).map(esc).join('<br>')}</td>
    <td>${passed.length ? passed.map(row=>`<strong>${label(row)}（${number(row.xg_difference_per_three)}）</strong><br><small>${evidence(row)}</small>`).join('<br>') : '暂无独立复测为正的推荐'}</td>
    <td>${sensitive.length ? sensitive.map(row=>`${label(row)}（每点 ${number(row.xg_difference_per_point)}）<br><small>${evidence(row)}</small>`).join('<br>') : '暂无每点敏感度结果'}</td>
    <td>${candidates.length ? candidates.map(row=>`${label(row)}（${number(row.exploration.metrics.xg_difference.delta)}）`).join('、') : `没有达到 +${candidateThreshold.toFixed(3)} 的探索候选`}</td>
@@ -197,16 +215,16 @@ function attributeResearchReport(job) {
    : position.startsWith('MC')||['ML','MR'].includes(position)
    ? [['possession','控球'],['pass_completion','传球成功率'],['passes','传球次数'],['xg','xG']]
    : [['xg','xG'],['shots','射门'],['shots_on_target','射正'],['goals_for','进球']];
-  return `<details><summary>${slot+1}. ${esc(all[0].player)} · ${all.length} 项属性</summary>
+  return `<details><summary>${slot+1}. <span translate="no">${esc(all[0].player)}</span> · ${all.length} 项属性</summary>
    <div class="table-scroll"><table><thead><tr><th>实际收益排名</th><th>每点敏感度排名</th><th>候选属性</th><th>原值 → 测试值</th><th>探索 xG 差变化</th><th>验证总影响</th><th>每点敏感度</th><th>保守误差区间</th><th>探索／验证配对</th><th>证据等级</th></tr></thead><tbody>
    ${all.map((row,index)=>`<tr><td>${row.n===validationCount&&row.xg_difference_per_three!=null?index+1:'—'}</td><td>${sensitivityRank.get(row.attribute)??'—'}</td><td>${label(row)}</td><td>${testedRange(row)}</td><td>${number(row.exploration.metrics.xg_difference.delta)}</td><td>${number(row.xg_difference_per_three)}</td><td>${number(row.xg_difference_per_point)}</td><td>${number(row.lower)} ～ ${number(row.upper)}</td><td>${row.exploration.n} / ${row.n}</td><td>${conclusion(row)}</td></tr>
     <tr><td colspan="10"><small>角色相关球队指标：${roleKeys.map(([key,name])=>`${name} ${number(row.metrics[key]?.delta)}`).join(' / ')}；正种子 ${row.positive_seed_rate==null?'—':`${(100*row.positive_seed_rate).toFixed(0)}%`}<br>${evidence(row)}<br>
-     ${row.opponents.map(op=>`${esc(op.name)}：${number(op.delta)}，${op.n} 对`).join('；')}</small></td></tr>`).join('')}
+     ${row.opponents.map(op=>`<span translate="no">${esc(op.name)}</span>：${number(op.delta)}，${op.n} 对`).join('；')}</small></td></tr>`).join('')}
    </tbody></table></div></details>`;
  }).join('');
  return `<section class="card match-statistics" id="attribute-recommendations"><div class="card-head"><h3>关键属性推荐总览</h3><button class="button" id="export-attribute-report">导出独立报告</button></div>
   <div class="card-body">${statusNotice}<p>探索与独立验证 · ${job.completed} / ${job.total} 场 · 实验 ${esc(job.id)}</p>
-  <p>对手：${settings.opponent_names.map(esc).join('、')}。等权汇总，先在同一种子内平均各对手变化，再计算误差。</p>
+  <p>对手：${settings.opponent_names.map(name=>`<span translate="no">${esc(name)}</span>`).join('、')}。等权汇总，先在同一种子内平均各对手变化，再计算误差。</p>
   <p>本次设置：${validationMode==='full'?'全部属性完整验证':'真正两阶段验证'}；${settings.profile_mode==='standard'?`标准属性档位 ${settings.standard_levels.join('、')}`:'当前球员属性'}；属性计划提升 ${attributeIncrease} 点（封顶 20）。探索 ${settings.exploration_seeds.length} 对、验证 ${settings.validation_seeds.length} 对；${dual?'每位置每榜候选上限':'每位置最多'} ${settings.candidate_limit ?? 5} 项。</p>
   ${dual?`<p>双榜候选去重后验证。完整验证模式评估全部属性，不受候选上限限制。验证为正是初步关注；探索和验证总收益均达到 +${candidateThreshold.toFixed(3)}，或每点收益均达到 +${(candidateThreshold/attributeIncrease).toFixed(4)}，是一般推荐。</p>
   <p>稳定推荐还要求探索与验证总收益均达到 +${strongThreshold.toFixed(3)}、验证至少 ${settings.stable_min_pairs??8} 对、至少 60% 种子和三分之二对手／档位为正，且四倍标准误区间下界为正。这是本次设置的证据分级，不是准确率保证。</p>`:
@@ -231,13 +249,6 @@ resultsView = function () {
  return selectedJob?.attribute_screen ? attributeScreenReport(selectedJob) + html : html;
 };
 
-const screenTacticsPrevious = tacticsView;
-tacticsView = function () {
- const html = screenTacticsPrevious();
- return `<section class="card match-statistics"><div class="card-head"><h3>角色关键属性</h3>
-  <button id="run-attribute-screen" class="button">运行角色关键属性分析</button></div></section>${html}`;
-};
-
 const screenBindPrevious = bind;
 bind = function () {
  screenBindPrevious();
@@ -249,38 +260,13 @@ bind = function () {
   const html = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>关键属性分析报告</title>
    <style>body{font:16px/1.6 system-ui,sans-serif;max-width:1200px;margin:32px auto;padding:0 24px;color:#172033;background:#f4f6fa}h3{margin:0}section{background:white;border:1px solid #dce1ea;border-radius:10px;margin:20px 0;padding:20px}.card-head{display:flex;justify-content:space-between;gap:20px}.table-scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:14px}th,td{padding:12px;text-align:left;border-bottom:1px solid #dde2ea}th{background:#edf1fa}.muted,.tiny{color:#536079;font-size:14px}summary{cursor:pointer;padding:16px}button{display:none}@media print{body{background:white;max-width:none;padding:0}section{break-inside:avoid}}</style>
    <h1>战术角色关键属性分析报告</h1><p>${esc(selectedJob.name || '')} · ${esc(selectedJob.id)} · ${selectedJob.completed} / ${selectedJob.total}</p>${content}</html>`;
-  const url = URL.createObjectURL(new Blob([html], {type:'text/html;charset=utf-8'}));
-  const link = document.createElement('a');
-  link.href = url; link.download = `attribute-report-${selectedJob.id}.html`;
-  link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
+  const doc=new DOMParser().parseFromString(html,'text/html');
+  doc.documentElement.lang=window.FM27I18n.language;
+  const translate=window.FM27I18n.translate;
+  const walker=doc.createTreeWalker(doc.documentElement,NodeFilter.SHOW_TEXT);
+  for(let node; (node=walker.nextNode());){
+   if(!node.parentElement.closest('style,[translate="no"]'))node.data=translate(node.data);
+  }
+  downloadFile(`attribute-report-${selectedJob.id}.html`,'<!doctype html>'+doc.documentElement.outerHTML,'text/html;charset=utf-8');
  };
 };
-
-// Cancellation is graceful: native workers finish releasing their current
-// match and accepted results are persisted before the job becomes cancelled.
-const cancellationResultsPrevious = resultsView;
-resultsView = function () {
- const html = cancellationResultsPrevious();
- if (!selectedJob?.cancel_requested) return html;
- return `<section class="card"><div class="card-body"><strong>正在安全停止</strong>
-  <p class="tiny muted">正在保存已完整结束的场次并释放原生比赛进程，通常需要数秒，期间完成数可能小幅增加。</p></div></section>${html}`;
-};
-const cancellationPollPrevious = poll;
-poll = async function () {
- await cancellationPollPrevious();
- if (!polledJob?.cancel_requested) return;
- const button = $('#cancel');
- if (button) { button.hidden = true; button.disabled = true; button.textContent = '正在停止…'; }
- $('#run-label').textContent = `正在安全停止 ${polledJob.completed} / ${polledJob.total}`;
- $('#run-detail').textContent = '正在保存完整场次并释放原生进程';
-};
-const cancellationButton = $('#cancel');
-if (cancellationButton) {
- const cancellationPrevious = cancellationButton.onclick;
- cancellationButton.onclick = async () => {
-  cancellationButton.disabled = true;
-  cancellationButton.textContent = '正在停止…';
-  await cancellationPrevious();
-  toast('正在安全停止；已完整结束的场次会先保存');
- };
-}

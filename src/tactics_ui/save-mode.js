@@ -198,7 +198,7 @@ async function previewSaveOpponent(key){
  }catch(e){toast(e.message);}
 }
 api=async function(url,data){
- if(url==='/api/run'&&data){
+ if((url==='/api/run'||url==='/api/run-attribute-screen')&&data){
   data={...data,name:$('#experiment-name').value.trim()||undefined};
   delete data.scenario.experimental_execution;
   if(data.reference)delete data.reference.experimental_execution;
@@ -211,7 +211,7 @@ api=async function(url,data){
    data.scenario={...data.scenario,experimental_execution:values};
    if(data.reference)data.reference={...data.reference,experimental_execution:values};
   }
-  if(saveMode==='save'){
+  if(url==='/api/run'&&saveMode==='save'){
    delete data.scenario.away_tactic_pool;if(data.reference)delete data.reference.away_tactic_pool;
    if(!saveLoaded||saveLoaded.club_uid!==saveClub||saveLoaded.save_id!==saveInfo.id)throw Error('请先将所选球队载入战术板');
    if(!saveChosen.size)throw Error('请至少选择一个存档对手');

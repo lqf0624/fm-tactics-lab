@@ -48,13 +48,13 @@ Each batch uses a sequence of random seeds. When comparing a saved reference wit
 
 ## Download and launch
 
-The current source version is **v1114.6**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Quit the previous app before launching an update.
+The current source version is **v1114**. Download published desktop builds from [GitHub Releases](https://github.com/lqf0624/fm-tactics-lab/releases). Quit the previous app before launching an update.
 
 Install FM27, open Steam and sign in to the account that owns the game, then launch the EXE. The tool looks for your installation automatically. You can also select the game root containing `fm_Data` and `shared` in the engine settings at the top.
 
 The EXE includes its Python runtime. Players do not need Python or a compiler. The interface follows the Windows display language and supports Chinese and English. Source setup is described in the [developer guide](docs/DEVELOPMENT.md).
 
-## v1114.6
+## v1114
 
 Save-specific player identities, reliable Chinese names and current registered shirts now follow squad and season changes. Select managed clubs or clubs from the loaded top five leagues, including cross-league opponents. Clubs without saved tactics explicitly reuse the current board. Two-round tests keep screening and retest seeds/statistics separate, support A/B comparison and resume, and disable opposition/specific marking instructions on both sides.
 
@@ -62,7 +62,7 @@ Coach references and preferences are validated. AI teams with unverifiable coach
 
 The app can use the existing `%LOCALAPPDATA%\FM27TacticsDesktop` data folder or a folder you choose at startup or in Settings. Steam native matches were validated. Epic adapter selection was checked in the unified package.
 
-The optional [role-attribute extension](extensions/role-attribute-research/README.md) remains pinned to its declared v1113.1 baseline; its integration patch has not been rebased to v1114.6.
+Open **Attribute Lab** from the tactics board to test individual attribute increases for selected starters. It pairs matches on the same seeds and uses a fresh seed set to validate shortlisted changes. Use the current opponent, selected career-save opponents, or the away tactic pool. Compare xG difference and effect per attribute point, then export an HTML report. The role-attribute research originated in [PR #18](https://github.com/lqf0624/fm-tactics-lab/pull/18).
 
 ## Career-save matches
 
@@ -166,7 +166,7 @@ The random away tactic pool can be combined with experimental tactical execution
 
 ## Version and project information
 
-The current source version is **v1114.6**, for Windows x64. The adapter reference build is `27.0.1+2503222`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
+The current source version is **v1114**, for Windows x64. The adapter reference build is `27.0.1+2503222`. Tool code is licensed under MIT; the engine and game resources come from your local installation.
 
 Original engine code and a career match's complete conditions are separate considerations. This tool standardizes starting states; inputs, random states and in-match interventions affect results. Evidence and validation scope are described in [Simulation Fidelity](docs/SIMULATION_FIDELITY.md).
 

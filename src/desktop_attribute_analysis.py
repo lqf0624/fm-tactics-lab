@@ -149,6 +149,12 @@ def validation_labels(details, selected_pairs=None, maximum=False):
     return {case['baseline'] for case in chosen} | {case['variant'] for case in chosen}
 
 
+def planned_matches(details, variant_count):
+    exploration = len(details['exploration_seeds']) * variant_count
+    validation_variants = len(validation_labels(details, maximum=True)) if details['validation_mode'] == 'two_stage' else variant_count
+    return exploration + len(details['validation_seeds']) * validation_variants
+
+
 def research_report(runs, details):
     """Average fixed opponents within seed before estimating uncertainty.
 

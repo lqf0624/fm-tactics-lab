@@ -75,7 +75,7 @@ def main():
     if args.offline:
         command.append('--offline')
     subprocess.run(command, cwd=ROOT / 'tauri', check=True)
-    version = 'v1114.6'
+    version = 'v1114'
     exe = dist / f'FM27-Tactics-Lab-{version}.exe'
     shutil.copyfile(target / toolchain_target / 'release/fm27-tactics-lab.exe', exe)
     adapters = {platform: hashlib.sha256((engine / 'fm27_native/FM27Simulator.exe').read_bytes()).hexdigest()

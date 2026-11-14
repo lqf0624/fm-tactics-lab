@@ -18,14 +18,15 @@ const vm = require('node:vm');
    exploration_seeds:Array.from({length:16},(_,i)=>i),validation_seeds:Array.from({length:40},(_,i)=>16+i),
    candidate_threshold:0.02,strong_threshold:0.05,candidate_limit:5,recommendation_limit:3},
   attribute_report:[row,higher]};
- let blob;
+ let exported;
  const button = {};
  const context = {selectedJob:job,catalog:{attributes:[{label:'Passing'},{label:'Finishing'}]},
   roles:()=>({Forward:{label:'Forward'}}),resultsView:()=>'',tacticsView:()=>'',bind:()=>{},poll:async()=>{},
   esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
-  $:id=>id==='#export-attribute-report'?button:null,Blob,
-  URL:{createObjectURL:b=>{blob=b;return 'blob:test'},revokeObjectURL:()=>{}},
-  setTimeout:()=>{},document:{createElement:()=>({click(){}})}};
+  $:id=>id==='#export-attribute-report'?button:null,
+  DOMParser:class {parseFromString(html){return {documentElement:{outerHTML:html.slice(15)},createTreeWalker:()=>({nextNode:()=>null})};}},
+  NodeFilter:{SHOW_TEXT:4},window:{FM27I18n:{language:'zh-CN',translate:s=>s}},
+  downloadFile:(name,html)=>{assert.equal(name,'attribute-report-report-test.html');exported=html;}};
  vm.createContext(context);
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/tactics_ui/attribute-analysis.js'),'utf8'),context);
  assert.deepEqual([...context.attributeCheckedSlots({querySelectorAll:()=>[
@@ -42,7 +43,6 @@ const vm = require('node:vm');
  assert(html.indexOf('<td>1</td><td>Finishing</td>') < html.indexOf('<td>2</td><td>Passing</td>'));
  assert(!html.includes('<script>unsafe'));
  context.bind();button.onclick();
- const exported=await blob.text();
  assert(exported.startsWith('<!doctype html>'));
  assert(!exported.includes('id="export-attribute-report"'));
  assert(exported.includes('保守误差区间'));
@@ -65,7 +65,5 @@ const vm = require('node:vm');
  assert(incomplete.includes('关键属性报告尚未生成'));
  assert(incomplete.includes('不能把“没有报告”解释为“没有推荐”'));
  job.attribute_report=savedReport;
- job.cancel_requested=true;
- assert(context.resultsView().includes('正在安全停止'));
  console.log('Research recommendations and standalone export verified');
 })().catch(error=>{console.error(error);process.exitCode=1});

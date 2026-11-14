@@ -1,6 +1,8 @@
 # Changelog
 
-## v1114.6 · 2026-11-14
+## v1114 · 2026-11-14
+
+- Add Attribute Lab to the tactics board. Test one attribute at a time for selected starters against fixed opposition, retest on fresh seeds, and export an HTML report. The main EXE includes the feature from PR #18.
 
 - Read save-specific player display names and registered shirts, including active loans; bind opposition instructions and historical events to player identity.
 - Select clubs and opponents across the loaded top five leagues using current-season membership.

@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "fm27-tactics-lab"
-version = "1.114.6"
+version = "1.114.0"
 dependencies = [
  "base64 0.22.1",
  "flate2",
